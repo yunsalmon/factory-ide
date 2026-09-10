@@ -23,7 +23,7 @@ def build(output, revision, runtime_dir=None):
     shutil.copytree(runtime_dir, output / 'vendor' / 'pyodide', dirs_exist_ok=True)
     python_runtime = output / 'runtime'
     python_runtime.mkdir(exist_ok=True)
-    for name in ('engine.py', 'model.py', 'messages.py'):
+    for name in ('engine.py', 'model.py', 'messages.py', 'orders.py', 'disruptions.py', 'operation_metrics.py'):
         shutil.copy(ROOT / name, python_runtime / name)
     source = (ROOT / 'examples/public_demo.py').read_text()
     result = execute(source)

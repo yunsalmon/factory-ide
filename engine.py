@@ -534,11 +534,8 @@ class Factory:
         diagnostics = self.diagnose()
         if self.order_pending:
             diagnostics.append(dict(code='order_release_backpressure', lots=sorted(self.order_pending)))
-        return dict(schema_version=2, operational_schema_version=1, initial_state=self.initial_state,
-                    order_schema_version=1, order_plan=self.order_plan,
-                    operational_diagnostics=diagnostics, allocations=self.allocations, events=self.events, model=self.model, warnings=warnings, warning_messages=[descriptor(w) for w in warnings],
         result = dict(schema_version=2, operational_schema_version=2, disruption_plan=self.disruptions, initial_state=self.initial_state,
-                    operational_diagnostics=self.diagnose(), allocations=self.allocations, events=self.events, model=self.model, warnings=warnings, warning_messages=[descriptor(w) for w in warnings],
+                    order_schema_version=1, order_plan=self.order_plan, operational_diagnostics=diagnostics, allocations=self.allocations, events=self.events, model=self.model, warnings=warnings, warning_messages=[descriptor(w) for w in warnings],
                     summary=dict(completed=len(completed), arrived=len(self.lots), horizon=self.model['duration'],
                                  mean_cycle_time=sum(l['completed'] - l['created'] for l in completed) / len(completed) if completed else 0))
         result['operation_metrics'] = operation_metrics(result)

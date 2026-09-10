@@ -61,3 +61,18 @@ cursor against `inventory.replay_inventory`; `python tests/browser_inventory.py`
 checks all three locales and mobile layout. Build `deploy/Dockerfile`, then run
 `python tests/browser_public.py http://127.0.0.1:PORT` against its static container
 to exercise actual browser execution and WIP/allocation/results together.
+
+Order/disruption integration retains the same placement contract. An order with
+`state: release_pending` and `placement.kind: release` is an external supply lot:
+WIP shows a separate pending-admission group (`location: RELEASE`), and it does
+not consume INPUT capacity until its arrival/buffer-entry event. It remains in
+released WIP totals, matching the engine and order planner. Machine-owned
+`maintenance` and `resource_wait` states are shown directly with localized labels.
+Order due-date projection retains its own physical-location adapter; WIP logical
+reservation destinations do not overwrite order physical locations.
+
+The static browser bundle includes orders, disruptions and operation metrics as
+Python runtime modules, plus all three dashboard scripts. The public browser test
+runs a finite-INPUT, delayed-order, offshift and shared-operator model in Pyodide,
+then checks every tab around pre-lot machine events, release and completion in
+ko/en/ja at desktop and mobile widths.

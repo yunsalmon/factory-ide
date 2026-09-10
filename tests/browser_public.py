@@ -18,6 +18,8 @@ with urlopen(base + '/demo.json') as response:
 # These assets must be present in the static Docker image, not provided by APIs.
 for asset in ['inventory-projection.js', 'inventory-ui.js', 'allocation-results.js',
               'browser-runtime.js', 'browser-worker.js', 'locales.json',
+              'order-projection.js', 'order-ui.js', 'operations.js',
+              'runtime/orders.py', 'runtime/disruptions.py', 'runtime/operation_metrics.py',
               'runtime/engine.py', 'runtime/model.py', 'runtime/messages.py']:
     with urlopen(base + '/' + asset) as response:
         assert response.status == 200 and response.read(), asset
@@ -99,6 +101,28 @@ with sync_playwright() as playwright:
             page.locator('[data-tab="results"]').click()
             assert page.locator('#results-view').is_visible()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        page.set_viewport_size({'width': 1600, 'height': 1100})
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from test_persona_integration import combined_model
+        edit(page, 'MODEL = ' + repr(combined_model()))
+        wait_checked(page)
+        run(page)
+        integrated = page.evaluate('S.result')
+        assert integrated['order_schema_version'] == 1
+        assert integrated['operational_schema_version'] == 2
+        assert integrated['summary']['completed'] == 4
+        nullable = next(e['index'] for e in integrated['events'] if e['lot'] is None)
+        pending = next(e['index'] + 1 for e in integrated['events'] if e['kind'] == 'order_release')
+        for width in [1600, 390]:
+            page.set_viewport_size({'width': width, 'height': 1000})
+            for cursor in [nullable + 1, pending, len(integrated['events'])]:
+                for tab in ['events', 'wip', 'orders', 'operations', 'results', 'allocations', 'lots', 'utilization', 'console']:
+                    page.evaluate('([c,t])=>{seek(c);selectTab(t)}', [cursor, tab])
+                    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            page.evaluate('(i)=>inspectEvent(i)', nullable)
+        page.evaluate('(c)=>{seek(c);selectTab("wip")}', pending)
+        assert page.evaluate('wipProjection().rows.some(r=>r.status==="release_pending" && r.kind!=="input")')
         page.set_viewport_size({'width': 1600, 'height': 1100})
 
         syntax_source = changed + '\ninvalid Python ???'

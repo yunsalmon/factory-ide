@@ -35,17 +35,19 @@ function inventoryProjection(result, cursor, options = {}) {
     const reserved = reservations.get(lot.id);
     let status = lot.state === "completed" ? "completed" : lot.state === "moving" ? "moving" : lot.state === "processing" ? "processing" : lot.state === "blocked" || (lot.state === "waiting" && boundary?.kind === "blocked") ? "blocked" : reserved || lot.state === "reserved" ? "reserved" : "waiting";
     const operation = lot.placement?.kind === "machine" ? operations[lot.placement.id] : null;
-    if (operation?.lot === lot.id && ["setup", "down", "offshift", "blocked"].includes(operation.state)) status = operation.state;
+    if (operation?.lot === lot.id && ["setup", "down", "maintenance", "offshift", "blocked", "resource_wait"].includes(operation.state)) status = operation.state;
+    if (lot.state === "release_pending") status = "release_pending";
     const physical = lot.placement?.id ?? lot.location;
     let location = status === "completed" ? "OUTPUT" : status === "reserved" ? reserved || lot.target || lot.location : physical;
     const buffer = lot.placement?.kind === "buffer" || !lot.placement ? buffers[physical] : null;
     let kind = status === "completed" ? "output" : status === "moving" ? "transit" : status === "reserved" ? "reserved" : status === "processing" ? "processing" : status === "blocked" ? "blocked" : (buffer?.at ?? location) === "INPUT" ? "input" : "queue";
-    if (["setup", "down", "offshift"].includes(status)) kind = status;
+    if (["setup", "down", "maintenance", "offshift", "resource_wait", "release_pending"].includes(status)) kind = status;
+    if (status === "release_pending") location = "RELEASE";
     if (status === "moving") location = `${lot.location} → ${lot.target ?? "?"}`;
     const anchor = buffer?.graph_node ?? buffer?.at ?? (status === "moving" ? lot.target : location);
     const meta = buffers[anchor] || machines[anchor] || buffer || machines[physical] || {};
     const route = lot.route || lot.assigned_route || latest?.route || "";
-    const waiting = ["waiting", "reserved", "blocked", "setup", "down", "offshift"].includes(status);
+    const waiting = ["waiting", "reserved", "blocked", "setup", "down", "maintenance", "offshift", "resource_wait", "release_pending"].includes(status);
     const since = waiting ? lot.wait_since ?? lot.ready_since ?? changedAt.get(lot.id) ?? null : null;
     const wait = since == null ? null : Math.max(0, time - since);
     // Explicit capacity applies to the whole physical buffer, not a filtered subgroup.

@@ -15,12 +15,16 @@ async function initialize() {
   if (runtime) return runtime;
   internalImportScripts("/vendor/pyodide/pyodide.js");
   pyodide = await loadPyodide({indexURL: new URL("/vendor/pyodide/", self.location.origin).href});
-  const [wheel, engine, model, messages, locales] = await Promise.all([
+  const [wheel, engine, model, messages, locales, orders, disruptions, metrics] = await Promise.all([
     internalFetch("/vendor/pyodide/simpy-4.1.1-py3-none-any.whl").then((response) => response.arrayBuffer()),
     internalFetch("/runtime/engine.py").then((response) => response.text()),
     internalFetch("/runtime/model.py").then((response) => response.text()),
     internalFetch("/runtime/messages.py").then((response) => response.text()),
     internalFetch("/locales.json").then((response) => response.text()),
+    internalFetch("/runtime/orders.py").then((response) => response.text()),
+    internalFetch("/runtime/disruptions.py").then((response) => response.text()),
+    internalFetch("/runtime/operation_metrics.py").then((response) => response.text()),
+
   ]);
   pyodide.unpackArchive(wheel, "zip");
   pyodide.FS.mkdirTree("/factory_runtime/web");
@@ -28,6 +32,9 @@ async function initialize() {
   pyodide.FS.writeFile("/factory_runtime/model.py", model);
   pyodide.FS.writeFile("/factory_runtime/messages.py", messages);
   pyodide.FS.writeFile("/factory_runtime/web/locales.json", locales);
+  pyodide.FS.writeFile("/factory_runtime/orders.py", orders);
+  pyodide.FS.writeFile("/factory_runtime/disruptions.py", disruptions);
+  pyodide.FS.writeFile("/factory_runtime/operation_metrics.py", metrics);
   await pyodide.runPythonAsync(`
 import builtins, contextlib, io, json, platform, sys, traceback
 sys.path.insert(0, "/factory_runtime")

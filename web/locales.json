@@ -577,7 +577,10 @@
     "ops_cause_down": "설비 중단",
     "ops_changeovers": "제품군 전환 기록",
     "ops_failure_limit": "{0}: 고장 계획이 설비당 5,000건 한도를 넘었습니다.",
-    "ops_hook_unsupported": "Custom process_lot은 중단·공유 자원 모델과 함께 사용할 수 없습니다. processing_time을 사용하세요."
+    "ops_hook_unsupported": "Custom process_lot은 중단·공유 자원 모델과 함께 사용할 수 없습니다. processing_time을 사용하세요.",
+    "wip_release_pending": "출하 지시 대기",
+    "wip_resource_wait": "공유 자원 대기",
+    "wip_maintenance": "계획 정비"
   },
   "en": {
     "ui_1": "Arrival",
@@ -1157,7 +1160,10 @@
     "ops_cause_down": "Machine unavailable",
     "ops_changeovers": "Family changeover records",
     "ops_failure_limit": "{0}: failure plan exceeds 5,000 incidents per machine.",
-    "ops_hook_unsupported": "Custom process_lot cannot be combined with interruptions or shared machine resources; use processing_time."
+    "ops_hook_unsupported": "Custom process_lot cannot be combined with interruptions or shared machine resources; use processing_time.",
+    "wip_release_pending": "Pending INPUT admission",
+    "wip_resource_wait": "Waiting for resource",
+    "wip_maintenance": "Planned maintenance"
   },
   "ja": {
     "ui_1": "投入",
@@ -1737,6 +1743,9 @@
     "ops_cause_down": "設備停止",
     "ops_changeovers": "製品群の変更記録",
     "ops_failure_limit": "{0}: 故障計画が設備あたり5,000件の上限を超えました。",
-    "ops_hook_unsupported": "Custom process_lotは中断・共有資源モデルと併用できません。processing_timeを使用してください。"
+    "ops_hook_unsupported": "Custom process_lotは中断・共有資源モデルと併用できません。processing_timeを使用してください。",
+    "wip_release_pending": "INPUT入場待ち",
+    "wip_resource_wait": "共有資源待ち",
+    "wip_maintenance": "計画保全"
   }
 }
