@@ -38,7 +38,7 @@ def edit(page, source):
 
 
 def wait_checked(page):
-    wait_for(page, 'window.factoryStudio.getState().valid', 90)
+    wait_for(page, 'window.factoryStudio.getState().valid', 210)
 
 
 def wait_for(page, expression, timeout=30):

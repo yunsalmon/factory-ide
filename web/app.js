@@ -96,7 +96,9 @@ function renderRuntimeState(state, runtime) {
     ready: "public_runtime_ready",
     running: "public_runtime_running",
     stopped: "public_runtime_stopped",
+    init_error: "public_init_error",
   };
+  if (!S.job) $("#run-button").textContent = tr(state === "loading" ? "ui_145" : "ui_152");
   $("#runtime-status").textContent = runtime
     ? `${tr(labels[state] || "public_runtime_ready")} · Python ${runtime.python} · SimPy ${runtime.simpy}`
     : tr(labels[state] || "public_runtime_idle");
@@ -196,12 +198,12 @@ async function applyCode(silent = false) {
   } catch (e) {
     if (revision !== S.revision) return false;
     S.valid = false;
-    S.parseErrorDetail = e.detail || e.error_message;
+    S.parseErrorDetail = e.code === "browser_init_timeout" ? {code: "public_init_timeout"} : e.detail || e.error_message;
     diagnostics(localized(e.message, S.parseErrorDetail));
     status({code: "ui_18"});
     if (!silent) {
       selectTab("console");
-      toast(e.detail || e.error_message || e.message);
+      toast(S.parseErrorDetail || e.message);
     }
     return false;
   }
@@ -828,7 +830,7 @@ function inspectLot(id, refresh = true) {
   }
 }
 async function run() {
-  if (S.job) {
+  if (S.job || (PUBLIC_DEMO && browserRuntime.state === "loading")) {
     await cancelRun();
     return;
   }
@@ -914,7 +916,7 @@ async function run() {
   } catch (e) {
     if (ticket !== runSerial) return;
     S.console = (e.console || S.console || "") + (e.traceback ? "\n" + e.traceback : "");
-    S.runtimeError = e.code === "browser_timeout" ? {code: "public_timeout"} : e.detail || e.error_message || e.message;
+    S.runtimeError = e.code === "browser_init_timeout" ? {code: "public_init_timeout"} : e.code === "browser_timeout" ? {code: "public_timeout"} : e.detail || e.error_message || e.message;
     S.runtimeErrorLine = e.line || null;
     markErrorLine(S.runtimeErrorLine);
     selectTab("console");
@@ -930,8 +932,12 @@ async function run() {
 }
 async function cancelRun() {
   const id = S.job;
-  if (!id) return;
-  if (PUBLIC_DEMO) browserRuntime.stop();
+  if (!id && !(PUBLIC_DEMO && browserRuntime.state === "loading")) return;
+  if (PUBLIC_DEMO) {
+    ++S.revision;
+    clearTimeout(parseTimer);
+    browserRuntime.stop();
+  }
   else await api("/api/cancel", { job_id: id });
   ++runSerial;
   S.job = null;

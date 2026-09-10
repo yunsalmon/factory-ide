@@ -413,7 +413,7 @@
     "public_reset_done": "예제 소스와 사전 계산 기록으로 초기화했습니다.",
     "public_timeout": "브라우저 실행 시간 제한(8초)을 초과했습니다. 실행 워커를 종료했습니다.",
     "public_runtime_idle": "브라우저 런타임 대기",
-    "public_runtime_loading": "브라우저 Python 준비 중…",
+    "public_runtime_loading": "브라우저 Python 다운로드 및 준비 중(느린 연결에서는 최대 3분). 중지 또는 초기화로 취소할 수 있습니다.",
     "public_runtime_checking": "브라우저에서 코드 확인 중…",
     "public_runtime_ready": "브라우저 런타임 준비됨",
     "public_runtime_running": "브라우저에서 SimPy 실행 중…",
@@ -580,7 +580,9 @@
     "ops_hook_unsupported": "Custom process_lot은 중단·공유 자원 모델과 함께 사용할 수 없습니다. processing_time을 사용하세요.",
     "wip_release_pending": "출하 지시 대기",
     "wip_resource_wait": "공유 자원 대기",
-    "wip_maintenance": "계획 정비"
+    "wip_maintenance": "계획 정비",
+    "public_init_error": "브라우저 Python 초기화 실패. 연결을 확인하고 다시 시도하세요.",
+    "public_init_timeout": "브라우저 Python 초기화가 3분을 초과하여 다운로드 워커를 중지했습니다. 연결을 확인하고 다시 시도하세요."
   },
   "en": {
     "ui_1": "Arrival",
@@ -996,7 +998,7 @@
     "public_reset_done": "Restored the example source and precomputed recording.",
     "public_timeout": "The 8-second browser execution limit was exceeded. The execution worker was terminated.",
     "public_runtime_idle": "Browser runtime idle",
-    "public_runtime_loading": "Preparing browser Python…",
+    "public_runtime_loading": "Downloading and preparing browser Python (up to 3 minutes on a slow connection). Stop or reset to cancel.",
     "public_runtime_checking": "Checking code in this browser…",
     "public_runtime_ready": "Browser runtime ready",
     "public_runtime_running": "Running SimPy in this browser…",
@@ -1163,7 +1165,9 @@
     "ops_hook_unsupported": "Custom process_lot cannot be combined with interruptions or shared machine resources; use processing_time.",
     "wip_release_pending": "Pending INPUT admission",
     "wip_resource_wait": "Waiting for resource",
-    "wip_maintenance": "Planned maintenance"
+    "wip_maintenance": "Planned maintenance",
+    "public_init_error": "Browser Python initialization failed. Check your connection and retry.",
+    "public_init_timeout": "Browser Python initialization exceeded 3 minutes. The download worker was stopped; check your connection and retry."
   },
   "ja": {
     "ui_1": "投入",
@@ -1579,7 +1583,7 @@
     "public_reset_done": "サンプルソースと事前計算記録に戻しました。",
     "public_timeout": "ブラウザー実行の上限（8秒）を超えました。実行ワーカーを終了しました。",
     "public_runtime_idle": "ブラウザーランタイム待機",
-    "public_runtime_loading": "ブラウザーPythonを準備中…",
+    "public_runtime_loading": "ブラウザーPythonをダウンロード・準備中（低速回線では最大3分）。停止またはリセットでキャンセルできます。",
     "public_runtime_checking": "ブラウザーでコードを確認中…",
     "public_runtime_ready": "ブラウザーランタイム準備完了",
     "public_runtime_running": "ブラウザーでSimPy実行中…",
@@ -1746,6 +1750,8 @@
     "ops_hook_unsupported": "Custom process_lotは中断・共有資源モデルと併用できません。processing_timeを使用してください。",
     "wip_release_pending": "INPUT入場待ち",
     "wip_resource_wait": "共有資源待ち",
-    "wip_maintenance": "計画保全"
+    "wip_maintenance": "計画保全",
+    "public_init_error": "ブラウザーPythonの初期化に失敗しました。接続を確認して再試行してください。",
+    "public_init_timeout": "ブラウザーPythonの初期化が3分を超えたため、ダウンロードワーカーを停止しました。接続を確認して再試行してください。"
   }
 }

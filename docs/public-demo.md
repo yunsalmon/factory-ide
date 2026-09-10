@@ -107,3 +107,14 @@ worker CSP, and the `/api/` rejection boundary. It does not prove public tunnel
 throughput; repeat the cold browser acceptance through the published hostname
 after the authorized image replacement. Proxy/CDN compression negotiation or
 cache rules can change observed delivery independently of the container.
+
+Initialization has a separate 180-second wall-clock allowance for cold downloads
+and Python startup. A measured slow tunnel WASM transfer alone took 36 seconds;
+loading the standard library and initializing Python can exceed the former
+60-second budget. The longer allowance is bounded and does not change the
+8-second parse/run limit. Loading status explains the wait in ko/en/ja; Stop and
+Reset terminate the loading worker. An initialization timeout has a distinct
+message and permits retry. Test the UI without slow downloads using
+`python tests/browser_initialization.py URL`; controller tests simulate 70-second
+success, the 180-second bound, cancellation/retry and the unchanged 8-second
+execution deadline with virtual timers.

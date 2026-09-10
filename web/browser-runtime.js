@@ -1,7 +1,7 @@
 "use strict";
 
 class BrowserPythonRuntime {
-  constructor({workerURL = "/browser-worker.js", initTimeout = 60_000, runTimeout = 8_000, onState = () => {}} = {}) {
+  constructor({workerURL = "/browser-worker.js", initTimeout = 180_000, runTimeout = 8_000, onState = () => {}} = {}) {
     this.workerURL = workerURL;
     this.initTimeout = initTimeout;
     this.runTimeout = runTimeout;
@@ -21,15 +21,23 @@ class BrowserPythonRuntime {
 
   createWorker() {
     this.worker = new Worker(this.workerURL);
+    const worker = this.worker;
     this.worker.addEventListener("message", (event) => this.receive(event.data));
     this.worker.addEventListener("error", (event) => {
       this.terminate(new Error(event.message || "Browser worker failed"));
       this.setState("stopped");
     });
     this.ready = this.request("init", {}, this.initTimeout).then((payload) => {
+      if (this.worker !== worker) throw Object.assign(new Error("Browser runtime stopped"), {code: "browser_stopped"});
       this.runtime = payload.runtime;
       this.setState("ready");
       return payload;
+    }).catch(error => {
+      if (this.worker === worker) {
+        this.terminate(error);
+        this.setState("init_error");
+      }
+      throw error;
     });
     return this.ready;
   }
@@ -51,9 +59,9 @@ class BrowserPythonRuntime {
     const id = ++this.serial;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        const error = Object.assign(new Error("Browser runtime wall-time limit exceeded"), {code: "browser_timeout"});
+        const error = Object.assign(new Error("Browser runtime wall-time limit exceeded"), {code: type === "init" ? "browser_init_timeout" : "browser_timeout"});
         this.terminate(error);
-        this.setState("stopped");
+        this.setState(type === "init" ? "init_error" : "stopped");
         reject(error);
       }, timeout);
       this.pending.set(id, {resolve, reject, timer});
