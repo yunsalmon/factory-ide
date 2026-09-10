@@ -21,6 +21,9 @@ def normalize_orders(model):
         try:
             if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})', value):
                 fail(field)
+            # datetime.fromisoformat normalizes +00:60; RFC3339 and JS reject it.
+            if not value.endswith('Z') and (int(value[-5:-3]) > 23 or int(value[-2:]) > 59):
+                fail(field)
             parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
             if parsed.tzinfo is None or parsed.utcoffset() is None:
                 fail(field)

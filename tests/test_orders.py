@@ -62,6 +62,15 @@ class OrderModelTests(unittest.TestCase):
             for key in ['order_invalid','order_quantity_mismatch','order_document_invalid']:
                 self.assertTrue(catalogue[lang][key])
 
+    def test_rejects_invalid_timezone_components_for_origin_and_due_date(self):
+        for offset in ['+00:60','-00:60','+12:99','-23:60','+24:00','-24:00','+99:00']:
+            for field in ['time_origin','due_date']:
+                model=ordered_model();model['time_origin']='2026-09-10T00:00:00Z'
+                if field=='time_origin':model[field]='2026-09-10T00:00:00'+offset
+                else:model['orders'][0].update(due_date='2026-09-10T00:00:00'+offset)
+                with self.subTest(offset=offset,field=field),self.assertRaises(ModelError) as error:validate(model)
+                self.assertEqual(error.exception.message['code'],'order_invalid')
+
     def test_date_requires_timezone_origin_and_agreement(self):
         for origin,date,due in [(None,'2026-09-10T00:06:00Z',6),
                                 ('2026-09-10T00:00:00','2026-09-10T00:06:00Z',6),
@@ -75,6 +84,24 @@ class OrderModelTests(unittest.TestCase):
 
 
 class OrderEngineTests(unittest.TestCase):
+    def test_machine_only_transitions_before_first_release_and_empty_plan(self):
+        for orders in [[],[dict(id='O',product='A',quantity=1,release_time=10)]]:
+            model=simple();model['orders']=orders
+            model['machines'][0]['availability']=[dict(state='down',start=1,end=3,cause='repair')]
+            trace=Factory(model).run()
+            self.assertEqual(trace,Factory(model).run())
+            down=next(e for e in trace['events'] if e.get('transition',{}).get('current',{}).get('state')=='down')
+            repaired=next(e for e in trace['events'] if e.get('transition',{}).get('previous',{}).get('state')=='down')
+            self.assertEqual((down['time'],repaired['time']),(1,3))
+            self.assertEqual(repaired['transition']['previous']['duration'],2)
+            self.assertIsNone(down['lot']);self.assertIsNone(down['affected_lot_id'])
+            self.assertEqual(down['state_changes']['lots'],{})
+            before=replay_inventory(trace,down['index']+1)
+            self.assertEqual(before['lots'],{})
+            self.assertEqual(before['machine_operations']['M']['state'],'down')
+            if not orders:self.assertEqual(replay_inventory(trace)['lots'],{})
+            else:self.assertTrue(all(e['time']>=10 for e in trace['events'] if e['kind']=='order_release'))
+
     def test_scheduled_release_quantity_and_horizon(self):
         model=ordered_model();trace=Factory(model).run()
         released=[e for e in trace['events'] if e['kind']=='order_release']

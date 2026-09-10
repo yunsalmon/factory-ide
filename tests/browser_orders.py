@@ -48,6 +48,14 @@ with sync_playwright() as p:
             page.locator('.order-editor button[type="submit"]').click()
             expect(page.locator('#order-error')).to_have_text(page.evaluate('tr("order_quantity_mismatch",["ORDER_A",99,5])'))
             assert page.evaluate('S.source')==source
+            for field in ['due_date','time_origin']:
+                bad=copy.deepcopy(doc);bad['time_origin']='2026-09-10T00:00:00Z'
+                if field=='due_date':bad['orders'][0]['due_date']='2026-09-10T00:00:00+00:60'
+                else:bad['time_origin']='2026-09-10T00:00:00-24:00'
+                page.locator('#order-document').fill(json.dumps(bad))
+                page.locator('.order-editor button[type="submit"]').click()
+                expect(page.locator('#order-error')).to_have_text(page.evaluate('(field)=>tr("order_invalid",[field])','ORDER_A.due_date' if field=='due_date' else 'time_origin'))
+                assert page.evaluate('S.source')==source
             page.locator('#order-close').click()
             if lang=='en' and not mobile:
                 page.locator('#run-button').click()
@@ -108,6 +116,26 @@ with sync_playwright() as p:
             assert page.evaluate('document.activeElement.id')=='order-progress'
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             assert page.locator('#order-table th:not([scope])').count()==0
+            # Before any release, calendar events are visible without phantom lots.
+            delayed=ordered_model();delayed['orders']=[dict(id='DELAYED',product='A',quantity=1,release_time=10)]
+            delayed['machines'][0]['availability']=[dict(state='down',start=1,end=3,cause='repair')]
+            delayed_trace=Factory(delayed).run()
+            down=next(e for e in delayed_trace['events'] if e.get('transition',{}).get('current',{}).get('state')=='down')
+            page.evaluate('([r,c])=>{S.model=r.model;S.result=r;S.selected=null;S.lot=null;seek(c);selectTab("events")}',[delayed_trace,down['index']+1])
+            page.locator(f'[data-event="{down["index"]}"]').click()
+            expect(page.locator('#inspector')).to_contain_text(page.evaluate('tr("order_down")'))
+            assert page.evaluate('Object.keys(stateAt().lots).length')==0
+            page.evaluate('closeInspector()')
+            for tab in ['results','allocations','lots','utilization','orders']:
+                page.locator(f'[data-tab="{tab}"]').click()
+            # Actual issue11 adapter is automatically selected by plannerProjection.
+            pending=ordered_model();pending['orders']=[dict(id='PENDING',product='A',quantity=2,lots=[dict(id='L1',quantity=1),dict(id='L2',quantity=1)])]
+            pending['buffers']=[dict(id='IN',at='INPUT',capacity=1)];pending['duration']=2
+            pending['machines'][0]['availability']=[dict(state='down',start=0,end=10)]
+            page.route('**/issue11-adapter-test.js',lambda route:route.fulfill(content_type='text/javascript',body=(ROOT/'tests/fixtures/inventory-projection-issue11.js').read_text()))
+            page.add_script_tag(url=base+'/issue11-adapter-test.js')
+            page.evaluate('(r)=>{S.model=r.model;S.result=r;PLANNER.filters={};PLANNER.finalView=false;S.selected=null;S.lot=null;seek(r.events.length);selectTab("orders")}',Factory(pending).run())
+            assert page.evaluate('plannerProjection().rows[0].locations')=={'IN':1,'INPUT (release)':1}
             assert not errors,errors
             page.screenshot(path=str(ROOT/'artifacts'/f'orders-{lang}-{"mobile" if mobile else "desktop"}.png'),full_page=True)
             print('PASS orders',lang,'mobile' if mobile else 'desktop',flush=True)

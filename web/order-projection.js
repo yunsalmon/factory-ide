@@ -10,13 +10,13 @@ function orderDefinitions(model) {
   });
 }
 function orderLotLocation(lot, model) {
-  if (!lot) return {location:null,node:null,state:"unreleased",operation:null};
+  if (!lot) return {location:null,node:null,state:"unreleased",operation:null,placement:null};
   const placement=lot.placement;
   const buffer=(model.buffers || []).find(b=>b.id===placement?.id);
   const node=placement?.kind==="buffer" ? buffer?.at ?? lot.location : placement?.kind==="machine" ? placement.id : lot.target || lot.location;
   const machine=(model.machines || []).find(m=>m.id===node);
   return {location:placement?.kind==="release" ? "INPUT (release)" : placement?.kind==="buffer" ? placement.id : placement?.kind==="transport" ? `${lot.location} → ${lot.target ?? "OUTPUT"}` : lot.location,
-    node, state:lot.state, operation:machine?.process ?? null, route:lot.route || lot.assigned_route || null};
+    placement:placement ? {...placement} : null, node, state:lot.state, operation:machine?.process ?? null, route:lot.route || lot.assigned_route || null};
 }
 function orderProjection(result, cursor, options={}) {
   const events=result?.events || [], model=result?.model || {};
@@ -35,7 +35,12 @@ function orderProjection(result, cursor, options={}) {
   const rows=definitions.map(order=>{
     const lots=order.lots.map(plan=>{
       const snapshot=states.get(plan.id), history=histories.get(plan.id)||[], done=snapshot?.state==="completed";
-      const location=orderLotLocation(snapshot,model), shared=inventory.get(plan.id);
+      const location=orderLotLocation(snapshot,model), candidate=inventory.get(plan.id);
+      // Legacy #11 inferred locations cannot overwrite explicit physical storage
+      // or external release placement. New adapters must attest matching identity.
+      const compatible=!snapshot?.placement || (options.inventory?.location_contract === "factory-placement-v1" &&
+        candidate?.placement?.kind===snapshot.placement.kind && candidate?.placement?.id===snapshot.placement.id && candidate?.state===snapshot.state);
+      const shared=compatible ? candidate : null;
       const releasedAt=snapshot?.released_at ?? snapshot?.created ?? null;
       return {...plan,...location,...(shared?{location:shared.location,node:shared.node,operation:shared.operation}:{}),
         released:!!snapshot, released_at:releasedAt, admitted_at:snapshot?.admitted_at ?? null,
