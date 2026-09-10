@@ -163,3 +163,11 @@ It supports Korean, English and Japanese, selection reasons, allocation comparis
 See [public demo deployment and recovery](docs/public-demo.md) for isolated build/testing,
 container operation and the proposed `factory.yshnote.com` ingress plan. This repository
 change alone does not establish that the external HTTPS deployment is live or accepted.
+
+### Order planning
+
+The **Order planner** tab adds optional order quantities, split lots, scheduled releases,
+business priority and due-date tracking without changing legacy generated supply.
+Try `examples/orders_demo.py`; use the tab's JSON plan editor/import/export and filtered CSV.
+See [order schema, replay metrics and dispatch contract](docs/orders.md) for time/date
+semantics, finite INPUT admission, localized validation and tests.

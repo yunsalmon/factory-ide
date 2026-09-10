@@ -42,6 +42,7 @@ let parseTimer,
   settingEditor = false,
   errorLine = null;
 const kinds = {
+  get order_release() { return tr("order_actual_release"); },
   get arrival() { return tr("ui_1"); },
   get ready() { return tr("ui_2"); },
   get decision() { return tr("ui_3"); },
@@ -409,6 +410,7 @@ function renderTrace() {
     container.innerHTML = `<pre class="console ${S.parseError ? "error" : ""}">${esc([S.parseError, ...S.warnings.map((w,i) => localized(w, S.warningMessages?.[i])), S.console, displayMessage(S.runtimeError)].filter(Boolean).join("\n\n") || tr("ui_67"))}</pre>`;
     return;
   }
+  if (S.tab === "orders") { renderPlanner(); return; }
   if (!S.result) {
     container.innerHTML =
       `<div class="empty"><b>${tr("ui_68")}</b>${tr("ui_69")}<br>${tr("ui_70")}</div>`;
