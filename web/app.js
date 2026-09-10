@@ -409,6 +409,7 @@ function renderTrace() {
     container.innerHTML = `<pre class="console ${S.parseError ? "error" : ""}">${esc([S.parseError, ...S.warnings.map((w,i) => localized(w, S.warningMessages?.[i])), S.console, displayMessage(S.runtimeError)].filter(Boolean).join("\n\n") || tr("ui_67"))}</pre>`;
     return;
   }
+  if (S.tab === "operations") { renderOperations(); return; }
   if (!S.result) {
     container.innerHTML =
       `<div class="empty"><b>${tr("ui_68")}</b>${tr("ui_69")}<br>${tr("ui_70")}</div>`;
@@ -1235,6 +1236,7 @@ $("#language").onchange = () => {
     if (selected.type === "event") { inspectEvent(selected.id); seek(cursor, true); }
     form.forEach(value => { const el = $("#property-form [name='" + value.name + "']"); if (el) {el.value = value.value; el.checked = value.checked;} });
   }
+  refreshOperationLocale();
   editor?.getWrapperElement().setAttribute("aria-label", tr("ui_158"));
   editor?.getInputField().setAttribute("aria-label", tr("ui_159"));
   if (cmCursor) editor.setCursor(cmCursor);

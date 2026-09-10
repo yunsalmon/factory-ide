@@ -21,6 +21,7 @@ def replay_inventory(result, cursor=None):
         lots=initial.get('lots', {}),
         machines=initial.get('machines', {m['id']: dict(state='idle', lot=None) for m in model['machines']}),
         buffers=initial.get('buffers', {b['id']: dict(b, contents=[]) for b in model['buffers']}),
+        resources=initial.get('resources', {}),
         machine_operations=initial.get('machine_operations', {m['id']: dict(state='idle', lot=None, since=0, cause='legacy_projection') for m in model['machines']})))
     for event in events[:cursor]:
         changes = event.get('state_changes', {})

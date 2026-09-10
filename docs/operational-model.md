@@ -1,5 +1,7 @@
 # Explicit buffers and machine operations
 
+[Disruptions and shared resources](disruptions-resources.md) extend this base contract with operational schema version 2, maintenance/resource-wait states, seeded repairs, family setup and operator forms.
+
 The optional operational model extends the existing Python MODEL and schema-v2 trace. Old source files do not need edits. `migrate_model(model)` validates and returns a detached normalized model; parsing and code synchronization still preserve the source declaration and user functions.
 
 ## Model contract
