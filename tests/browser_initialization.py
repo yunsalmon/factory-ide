@@ -34,3 +34,31 @@ with sync_playwright() as p:
         print('PASS initialization loading/Stop/Reset/timeout',language)
         page.close()
     browser.close()
+
+# Native Worker entry-script network failure, distinct from a worker that starts
+# successfully and later fails while importing runtime modules.
+with sync_playwright() as p:
+    browser=p.chromium.launch()
+    for language in ['en','ko','ja']:
+        context=browser.new_context(locale=language)
+        context.route('**/browser-worker.js',lambda route:route.abort('failed'))
+        page=context.new_page();page.goto(base)
+        def wait(expression, timeout=15):
+            deadline=time.monotonic()+timeout
+            while not page.evaluate(expression):
+                assert time.monotonic()<deadline,expression
+                page.wait_for_timeout(30)
+        wait('Boolean(window.factoryStudio?.getState().result)')
+        page.evaluate('()=>editor.setValue(editor.getValue()+"\\n# entry load failure\\n")')
+        wait('S.runtimeState === "init_error"')
+        wait('S.parseErrorDetail?.code === "public_init_error"')
+        assert page.locator('#runtime-status').inner_text()==page.evaluate('tr("public_init_error")')
+        assert page.evaluate('S.parseError === tr("public_init_error")')
+        assert page.evaluate('browserRuntime.worker===null && browserRuntime.pending.size===0')
+        context.unroute('**/browser-worker.js')
+        page.locator('#run-button').click()
+        wait('S.result?.execution?.kind === "browser" && !S.job', 45)
+        assert page.evaluate('S.valid && S.runtimeState === "ready"')
+        print('PASS native entry failure localization and real-worker retry',language)
+        context.close()
+    browser.close()

@@ -198,7 +198,7 @@ async function applyCode(silent = false) {
   } catch (e) {
     if (revision !== S.revision) return false;
     S.valid = false;
-    S.parseErrorDetail = e.code === "browser_init_timeout" ? {code: "public_init_timeout"} : e.detail || e.error_message;
+    S.parseErrorDetail = e.code === "browser_init_error" ? {code: "public_init_error"} : e.code === "browser_init_timeout" ? {code: "public_init_timeout"} : e.detail || e.error_message;
     diagnostics(localized(e.message, S.parseErrorDetail));
     status({code: "ui_18"});
     if (!silent) {
@@ -916,7 +916,7 @@ async function run() {
   } catch (e) {
     if (ticket !== runSerial) return;
     S.console = (e.console || S.console || "") + (e.traceback ? "\n" + e.traceback : "");
-    S.runtimeError = e.code === "browser_init_timeout" ? {code: "public_init_timeout"} : e.code === "browser_timeout" ? {code: "public_timeout"} : e.detail || e.error_message || e.message;
+    S.runtimeError = e.code === "browser_init_error" ? {code: "public_init_error"} : e.code === "browser_init_timeout" ? {code: "public_init_timeout"} : e.code === "browser_timeout" ? {code: "public_timeout"} : e.detail || e.error_message || e.message;
     S.runtimeErrorLine = e.line || null;
     markErrorLine(S.runtimeErrorLine);
     selectTab("console");

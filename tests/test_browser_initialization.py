@@ -65,3 +65,27 @@ class InitializationTests(unittest.TestCase):
           await retry;advance(180000);await flush();
           if(r.state!=='ready'||fresh.dead)throw Error('old timeout affected retry');
         }''')
+
+    def test_native_worker_error_during_initialization_is_classified(self):
+        self.page.evaluate('''async()=>{
+          const r=new BrowserPythonRuntime(),p=r.parse('').catch(e=>e),w=r.worker;
+          w.handlers.error({message:''});await flush();const error=await p;
+          if(error.code!=='browser_init_error'||r.state!=='init_error'||!w.dead||r.pending.size)
+            throw Error('entry-script failure lost initialization classification');
+          const retry=r.ensureReady(),fresh=r.worker;
+          w.handlers.error({message:'late stale error'});
+          if(fresh.dead)throw Error('stale worker killed retry');
+          fresh.reply({id:fresh.messages[0].id,type:'ready',runtime:{python:'3.12.7'}});
+          await retry;
+          if(r.state!=='ready')throw Error('initialization retry failed');
+        }''')
+
+    def test_post_ready_native_crash_keeps_execution_semantics(self):
+        self.page.evaluate('''async()=>{
+          const r=new BrowserPythonRuntime(),ready=r.ensureReady(),w=r.worker;
+          w.reply({id:w.messages[0].id,type:'ready',runtime:{python:'3.12.7'}});await ready;
+          const p=r.run('').catch(e=>e);await flush();
+          w.handlers.error({message:'execution crash'});await flush();const error=await p;
+          if(error.code==='browser_init_error'||error.message!=='execution crash'||r.state!=='stopped'||!w.dead)
+            throw Error('post-ready crash was misclassified');
+        }''')

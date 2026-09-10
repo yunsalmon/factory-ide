@@ -24,8 +24,12 @@ class BrowserPythonRuntime {
     const worker = this.worker;
     this.worker.addEventListener("message", (event) => this.receive(event.data));
     this.worker.addEventListener("error", (event) => {
-      this.terminate(new Error(event.message || "Browser worker failed"));
-      this.setState("stopped");
+      if (this.worker !== worker) return;
+      const initializing = this.state === "loading";
+      const error = new Error(event.message || "Browser worker failed");
+      if (initializing) error.code = "browser_init_error";
+      this.terminate(error);
+      this.setState(initializing ? "init_error" : "stopped");
     });
     this.ready = this.request("init", {}, this.initTimeout).then((payload) => {
       if (this.worker !== worker) throw Object.assign(new Error("Browser runtime stopped"), {code: "browser_stopped"});
