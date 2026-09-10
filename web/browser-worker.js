@@ -87,11 +87,15 @@ def _execute(source):
         raise ModelError(message("message_37"))
     return Factory(model, namespace.get("choose_candidate"), namespace.get("processing_time"), namespace.get("process_lot")).run()
 
-def _handle(operation, source, seed=None):
+def _handle(operation, source, seed=None, updated_model=None):
     log = _LimitedLog()
     try:
         if len(source.encode("utf-8")) > 1_000_000:
             raise ModelError("Source exceeds the 1 MB browser limit")
+        if operation == "sync":
+            source = synchronize(source, updated_model)
+            if len(source.encode("utf-8")) > 1_000_000:
+                raise ModelError("Source exceeds the 1 MB browser limit")
         if operation == "run_seed":
             if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**32:
                 raise ModelError("Invalid experiment seed")
@@ -100,9 +104,11 @@ def _handle(operation, source, seed=None):
             source = synchronize(source, model)
             import random
             random.seed(seed)
-        if operation == "parse":
+        if operation in ("parse", "sync"):
             model, _, warnings = parse(source)
             payload = {"model": model, "warnings": warnings, "warning_messages": [descriptor(w) for w in warnings]}
+            if operation == "sync":
+                payload["source"] = source
         else:
             with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
                 result = _execute(source)
@@ -148,13 +154,14 @@ async function handle(message) {
       send({type: "ready", id: message.id, runtime: details});
       return;
     }
-    if (!["parse", "run", "run_seed"].includes(message.type) || typeof message.source !== "string") {
+    if (!["parse", "run", "run_seed", "sync"].includes(message.type) || typeof message.source !== "string") {
       throw new TypeError("Invalid browser worker request");
     }
     pyodide.globals.set("__factory_operation", message.type);
     pyodide.globals.set("__factory_source", message.source);
     pyodide.globals.set("__factory_seed", message.seed ?? null);
-    const response = JSON.parse(await pyodide.runPythonAsync("_handle(__factory_operation, __factory_source, __factory_seed)"));
+    pyodide.globals.set("__factory_model_json", JSON.stringify(message.model ?? null));
+    const response = JSON.parse(await pyodide.runPythonAsync("_handle(__factory_operation, __factory_source, __factory_seed, json.loads(__factory_model_json))"));
     if (!response.ok) {
       send({type: "error", id: message.id, ...response});
       return;

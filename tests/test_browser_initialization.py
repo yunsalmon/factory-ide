@@ -89,3 +89,15 @@ class InitializationTests(unittest.TestCase):
           if(error.code==='browser_init_error'||error.message!=='execution crash'||r.state!=='stopped'||!w.dead)
             throw Error('post-ready crash was misclassified');
         }''')
+
+    def test_model_sync_uses_worker_and_eight_second_deadline(self):
+        self.page.evaluate('''async()=>{
+          const r=new BrowserPythonRuntime(),ready=r.ensureReady(),w=r.worker;
+          w.reply({id:w.messages[0].id,type:'ready',runtime:{python:'3.12.7'}});await ready;
+          const model={machines:[{id:'CUT_A',time:11}]};
+          const p=r.sync('MODEL = {}',model).catch(e=>e.code);await flush();
+          const request=w.messages.at(-1);
+          if(request.type!=='sync'||request.model!==model||r.state!=='checking')throw Error('sync transport mismatch');
+          advance(7999);await flush();if(w.dead)throw Error('sync timeout early');
+          advance(1);if(await p!=='browser_timeout'||!w.dead)throw Error('sync budget changed');
+        }''')

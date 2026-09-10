@@ -217,7 +217,7 @@ async function mutate(change) {
   change(model);
   S.busy = true;
   try {
-    const data = await api("/api/sync", { source: S.source, model });
+    const data = PUBLIC_DEMO ? await browserRuntime.sync(S.source, model) : await api("/api/sync", { source: S.source, model });
     if (revision !== S.revision)
       throw new Error(tr("ui_21"));
     invalidateTrace();
@@ -604,7 +604,7 @@ function locate(id) {
   updateEditor();
 }
 function inspectMachine(id, newMachine = false) {
-  if (PUBLIC_DEMO) return toast({code: "public_scope"});
+  if (PUBLIC_DEMO && newMachine) return toast({code: "public_scope"});
   const m = newMachine
     ? { id, name: tr("ui_84"), process: S.model.processes[0].id, line: "A", time: 5 }
     : S.model.machines.find((m) => m.id === id);
@@ -617,7 +617,7 @@ function inspectMachine(id, newMachine = false) {
       "process",
       m.process,
       S.model.processes.map((p) => [p.id, p.name]),
-    )}${field(tr("ui_90"), "line", m.line, "text", "required")}${field(tr("ui_91"), "time", m.time, "number", 'min="0.01" step="any" required')}${actions(!newMachine)}</form>${!newMachine ? `<button id="locate-code" class="quiet" style="margin-top:15px">${tr("ui_92")}</button>` : ""}`,
+    )}${field(tr("ui_90"), "line", m.line, "text", "required")}${field(tr("ui_91"), "time", m.time, "number", 'min="0.01" step="any" required')}${actions(!newMachine && !PUBLIC_DEMO)}</form>${!newMachine ? `<button id="locate-code" class="quiet" style="margin-top:15px">${tr("ui_92")}</button>` : ""}`,
   );
   bindForm(async (f) => {
     const machine = {
@@ -639,7 +639,7 @@ function inspectMachine(id, newMachine = false) {
   });
   if (!newMachine) {
     $("#locate-code").onclick = () => locate(id);
-    $("#delete-item").onclick = async () => {
+    if (!PUBLIC_DEMO) $("#delete-item").onclick = async () => {
       try {
         await mutate((model) => {
           model.machines = model.machines.filter((m) => m.id !== id);

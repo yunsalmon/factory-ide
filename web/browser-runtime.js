@@ -92,6 +92,17 @@ class BrowserPythonRuntime {
     }
   }
 
+  async sync(source, model) {
+    await this.ensureReady();
+    this.setState("checking");
+    try {
+      const message = await this.request("sync", {source, model});
+      return message.payload;
+    } finally {
+      if (this.worker) this.setState("ready");
+    }
+  }
+
   async run(source) {
     await this.ensureReady();
     this.setState("running");

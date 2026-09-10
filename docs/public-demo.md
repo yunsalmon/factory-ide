@@ -118,3 +118,12 @@ message and permits retry. Test the UI without slow downloads using
 `python tests/browser_initialization.py URL`; controller tests simulate 70-second
 success, the 180-second bound, cancellation/retry and the unchanged 8-second
 execution deadline with virtual timers.
+
+Existing machines can also be edited from the public graph: select a machine,
+change its processing time in the inspector, and apply. Model validation and
+AST-based source synchronization run inside the same browser worker, preserving
+handwritten functions and invalidating the previous trace. No `/api/sync` request
+is made. Structural creation/deletion controls remain outside this public flow.
+Run `python tests/browser_public_machine.py URL` against a static image to check
+CUT_A inspection/edit/execution, invalid-model rejection, and WIP highlighting in
+ko/en/ja. Local `tests/browser_smoke.py` continues to cover the full local editor.
