@@ -115,3 +115,52 @@ class InventoryProjectionTests(unittest.TestCase):
         self.assertEqual(values,["'=1+1",'a,"b\n'])
 
 if __name__=='__main__': unittest.main()
+
+class OperationalInventoryIntegrationTests(unittest.TestCase):
+    setUpClass = classmethod(InventoryProjectionTests.setUpClass.__func__)
+    tearDownClass = classmethod(InventoryProjectionTests.tearDownClass.__func__)
+    def test_operational_placement_capacity_and_machine_states_every_cursor(self):
+        from test_operations import line
+        from inventory import replay_inventory
+        for mode in ('pull', 'push'):
+            model = line(); model['mode'] = mode
+            model['machines'][0]['setup_time'] = .5
+            trace = Factory(model).run()
+            projections = self.page.evaluate('r=>Array.from({length:r.events.length+1},(_,i)=>inventoryProjection(r,i))', trace)
+            seen = set()
+            for cursor, projected in enumerate(projections):
+                oracle = replay_inventory(trace, cursor)
+                rows = {r['id']: r for r in projected['allRows']}
+                self.assertEqual(len(rows), len(projected['allRows']))
+                self.assertEqual(set(rows), set(oracle['lots']))
+                self.assertEqual(projected['allTotals']['wip'], oracle['summary']['wip'])
+                for lid, lot in oracle['lots'].items():
+                    row = rows[lid]; seen.add(row['status'])
+                    self.assertEqual(row['placement'], lot['placement'])
+                    self.assertEqual(row['physical'], lot['placement']['id'])
+                    self.assertTrue(all(i < cursor for i in row['history']))
+                    if lot['placement']['kind'] == 'buffer':
+                        buffer = oracle['buffers'][lot['placement']['id']]
+                        self.assertIn(lid, buffer['contents'])
+                        self.assertEqual(row['node'], buffer['at'])
+                        self.assertFalse(row['inferred'])
+                    if lot['placement']['kind'] == 'machine':
+                        op = oracle['machine_operations'][lot['placement']['id']]
+                        if op['state'] in ('setup', 'down', 'offshift', 'blocked'):
+                            self.assertEqual(row['status'], op['state'])
+                for group in projected['groups']:
+                    physical = {r['physical'] for r in group['rows']}
+                    if len(physical) == 1 and next(iter(physical)) in oracle['buffers']:
+                        self.assertEqual(group['occupancy'], oracle['buffers'][next(iter(physical))]['occupancy'])
+            self.assertIn('setup', seen)
+            for event in trace['events']:
+                if event.get('affected_lot_id', 'legacy') is None and event.get('lot'):
+                    rows = {r['id']: r for r in projections[event['index'] + 1]['allRows']}
+                    if event['lot']['id'] in rows:
+                        self.assertNotIn(event['index'], rows[event['lot']['id']]['history'])
+            self.assertIn('blocked', seen)
+            self.assertIn('completed', seen)
+            # Completed output remains stored and consumes physical output capacity.
+            final = projections[-1]
+            output = next(g for g in final['groups'] if g['kind'] == 'output')
+            self.assertEqual(output['occupancy'], model['source']['count'])

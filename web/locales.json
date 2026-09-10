@@ -417,7 +417,10 @@
     "public_runtime_checking": "브라우저에서 코드 확인 중…",
     "public_runtime_ready": "브라우저 런타임 준비됨",
     "public_runtime_running": "브라우저에서 SimPy 실행 중…",
-    "public_runtime_stopped": "실행 워커 종료됨"
+    "public_runtime_stopped": "실행 워커 종료됨",
+    "wip_setup": "셋업",
+    "wip_down": "중단",
+    "wip_offshift": "비가동 교대"
   },
   "en": {
     "ui_1": "Arrival",
@@ -837,7 +840,10 @@
     "public_runtime_checking": "Checking code in this browser…",
     "public_runtime_ready": "Browser runtime ready",
     "public_runtime_running": "Running SimPy in this browser…",
-    "public_runtime_stopped": "Execution worker stopped"
+    "public_runtime_stopped": "Execution worker stopped",
+    "wip_setup": "Setup",
+    "wip_down": "Down",
+    "wip_offshift": "Off shift"
   },
   "ja": {
     "ui_1": "投入",
@@ -1257,6 +1263,9 @@
     "public_runtime_checking": "ブラウザーでコードを確認中…",
     "public_runtime_ready": "ブラウザーランタイム準備完了",
     "public_runtime_running": "ブラウザーでSimPy実行中…",
-    "public_runtime_stopped": "実行ワーカーを終了しました"
+    "public_runtime_stopped": "実行ワーカーを終了しました",
+    "wip_setup": "段取り",
+    "wip_down": "停止",
+    "wip_offshift": "シフト外"
   }
 }

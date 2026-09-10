@@ -6,17 +6,23 @@ function inventoryProjection(result, cursor, options = {}) {
   const prefix = events.slice(0, end);
   const time = options.finalView ? result?.summary?.horizon ?? prefix.at(-1)?.time ?? 0 : prefix.at(-1)?.time ?? 0;
   const machines = Object.fromEntries((result?.model?.machines || []).map(m => [m.id, m]));
-  const buffers = Object.fromEntries((result?.model?.buffers || []).map(b => [b.id, b]));
-  const lots = new Map(), machineStates = Object.create(null), history = new Map(), changedAt = new Map();
+  const buffers = Object.assign(Object.create(null), Object.fromEntries((result?.model?.buffers || []).map(b => [b.id, b])));
+  const initial = result?.initial_state || {};
+  const lots = new Map(Object.entries(initial.lots || {})), machineStates = Object.assign(Object.create(null), initial.machines),
+    operations = Object.assign(Object.create(null), initial.machine_operations), history = new Map(), changedAt = new Map();
+  Object.assign(buffers, initial.buffers);
+  for (const [id, lot] of lots) changedAt.set(id, lot.location_since ?? 0);
   for (const e of prefix) {
     const changes = e.state_changes?.lots ?? (e.lot ? {[e.lot.id]: e.lot} : {});
     for (const [id, snapshot] of Object.entries(changes)) {
       const previous = lots.get(id);
-      if (!previous || previous.location !== snapshot.location || previous.state !== snapshot.state) changedAt.set(id, e.time);
+      if (!previous || previous.location !== snapshot.location || previous.state !== snapshot.state || JSON.stringify(previous.placement) !== JSON.stringify(snapshot.placement)) changedAt.set(id, e.time);
       lots.set(id, {...snapshot, id});
     }
     Object.assign(machineStates, e.state_changes?.machines || {});
-    if (e.lot) {
+    Object.assign(buffers, e.state_changes?.buffers);
+    Object.assign(operations, e.state_changes?.machine_operations);
+    if (e.lot && e.affected_lot_id !== null) {
       if (!history.has(e.lot.id)) history.set(e.lot.id, []);
       history.get(e.lot.id).push(e);
     }
@@ -28,15 +34,18 @@ function inventoryProjection(result, cursor, options = {}) {
     const boundary = events.findLast(e => ["ready", "arrival", "assigned", "move", "start", "finish", "complete", "blocked"].includes(e.kind));
     const reserved = reservations.get(lot.id);
     let status = lot.state === "completed" ? "completed" : lot.state === "moving" ? "moving" : lot.state === "processing" ? "processing" : lot.state === "blocked" || (lot.state === "waiting" && boundary?.kind === "blocked") ? "blocked" : reserved || lot.state === "reserved" ? "reserved" : "waiting";
-    let location = status === "completed" ? "OUTPUT" : status === "reserved" ? reserved || lot.target || lot.location : lot.location;
-    const physical = lot.location;
-    const buffer = buffers[location];
-    let kind = status === "completed" ? "output" : status === "moving" ? "transit" : status === "reserved" ? "reserved" : status === "processing" ? "processing" : status === "blocked" ? "blocked" : location === "INPUT" ? "input" : "queue";
-    if (status === "moving") location = `${physical} → ${lot.target ?? "?"}`;
-    const anchor = buffer?.graph_node ?? (status === "moving" ? lot.target : location);
+    const operation = lot.placement?.kind === "machine" ? operations[lot.placement.id] : null;
+    if (operation?.lot === lot.id && ["setup", "down", "offshift", "blocked"].includes(operation.state)) status = operation.state;
+    const physical = lot.placement?.id ?? lot.location;
+    let location = status === "completed" ? "OUTPUT" : status === "reserved" ? reserved || lot.target || lot.location : physical;
+    const buffer = lot.placement?.kind === "buffer" || !lot.placement ? buffers[physical] : null;
+    let kind = status === "completed" ? "output" : status === "moving" ? "transit" : status === "reserved" ? "reserved" : status === "processing" ? "processing" : status === "blocked" ? "blocked" : (buffer?.at ?? location) === "INPUT" ? "input" : "queue";
+    if (["setup", "down", "offshift"].includes(status)) kind = status;
+    if (status === "moving") location = `${lot.location} → ${lot.target ?? "?"}`;
+    const anchor = buffer?.graph_node ?? buffer?.at ?? (status === "moving" ? lot.target : location);
     const meta = buffers[anchor] || machines[anchor] || buffer || machines[physical] || {};
     const route = lot.route || lot.assigned_route || latest?.route || "";
-    const waiting = ["waiting", "reserved", "blocked"].includes(status);
+    const waiting = ["waiting", "reserved", "blocked", "setup", "down", "offshift"].includes(status);
     const since = waiting ? lot.wait_since ?? lot.ready_since ?? changedAt.get(lot.id) ?? null : null;
     const wait = since == null ? null : Math.max(0, time - since);
     // Explicit capacity applies to the whole physical buffer, not a filtered subgroup.
@@ -44,7 +53,7 @@ function inventoryProjection(result, cursor, options = {}) {
     const decision = events.findLast(e => ["decision", "blocked"].includes(e.kind));
     return {id: lot.id, product: lot.product ?? "", quantity: Number.isFinite(lot.quantity) ? lot.quantity : null,
       process: buffer?.process ?? meta.process ?? "", line: buffer?.line ?? meta.line ?? "", location, physical,
-      kind, status, target: lot.target ?? "", operation: lot.operation ?? machines[physical]?.process ?? "",
+      placement: lot.placement ?? null, cause: operation?.cause ?? null, kind, status, target: lot.target ?? "", operation: lot.operation ?? machines[physical]?.process ?? "",
       arrival: lot.created ?? null, release: lot.released_at ?? null, locationArrival: lot.location_since ?? changedAt.get(lot.id) ?? null,
       wait, waitSince: since, route, node: anchor ?? physical, capacity, inferred: !buffer && kind === "queue",
       decision: decision?.index ?? null, history: events.map(e => e.index)};
@@ -76,7 +85,7 @@ function inventoryProjection(result, cursor, options = {}) {
     const locations = new Set(g.rows.map(r => r.physical));
     const buffer = groupBy === "location" && locations.size === 1 ? buffers[g.rows[0].physical] : null;
     const capacity = buffer && Number.isFinite(buffer.capacity) && buffer.capacity >= 0 ? buffer.capacity : null;
-    const occupancy = buffer ? rows.filter(r => r.physical === buffer.id && !["moving","completed"].includes(r.status)).length : null;
+    const occupancy = buffer ? buffer.contents?.length ?? rows.filter(r => r.physical === buffer.id && !["moving","completed"].includes(r.status)).length : null;
     return {...g,...stats(g.rows), capacity, occupancy,
       congestion: capacity !== null ? occupancy >= capacity ? "capacity" : "available" : g.rows.some(r => r.status === "blocked") ? "blocked" : g.rows.filter(r => r.inferred).length >= 2 ? "queue" : "unknown"};
   });

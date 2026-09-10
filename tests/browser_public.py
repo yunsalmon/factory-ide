@@ -15,6 +15,13 @@ from playwright.sync_api import sync_playwright, expect
 base = sys.argv[1].rstrip('/')
 with urlopen(base + '/demo.json') as response:
     bundle = json.load(response)
+# These assets must be present in the static Docker image, not provided by APIs.
+for asset in ['inventory-projection.js', 'inventory-ui.js', 'allocation-results.js',
+              'browser-runtime.js', 'browser-worker.js', 'locales.json',
+              'runtime/engine.py', 'runtime/model.py', 'runtime/messages.py']:
+    with urlopen(base + '/' + asset) as response:
+        assert response.status == 200 and response.read(), asset
+
 result = bundle['result']
 version = bundle['version']
 assert hashlib.sha256(bundle['source'].encode()).hexdigest() == version['source_sha256']
@@ -77,6 +84,22 @@ with sync_playwright() as playwright:
         assert custom['execution']['runtime'] == {'pyodide': '0.27.7', 'python': '3.12.7', 'simpy': '4.1.1'}
         assert custom['execution']['source_sha256'] == hashlib.sha256(changed.encode()).hexdigest()
         assert not any('/api/' in url for url in requests), requests
+
+        # The same worker-produced result feeds every operator dashboard, on
+        # desktop and mobile, without injecting a separate server result.
+        for width, height in [(1600, 1100), (390, 844)]:
+            page.set_viewport_size({'width': width, 'height': height})
+            page.evaluate('()=>{pause();seek(S.result.events.length);selectTab("wip")}')
+            assert page.evaluate('wipProjection().allTotals.count') == custom['summary']['arrived']
+            assert page.evaluate('wipProjection().allTotals.wip') == custom['summary']['arrived'] - custom['summary']['completed']
+            assert page.locator('#wip-lots tbody tr').count() == custom['summary']['arrived']
+            page.locator('[data-wip-lot]').first.click()
+            page.locator('[data-wip-reason]').click()
+            assert page.locator('#allocation-detail').count() == 1
+            page.locator('[data-tab="results"]').click()
+            assert page.locator('#results-view').is_visible()
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        page.set_viewport_size({'width': 1600, 'height': 1100})
 
         syntax_source = changed + '\ninvalid Python ???'
         syntax_line = len(syntax_source.splitlines())
