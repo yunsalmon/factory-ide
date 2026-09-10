@@ -13,6 +13,7 @@ const DATA_STATES=['idle','reserved','processing','setup','down','blocked','star
 const dataCopy=value=>JSON.parse(JSON.stringify(value));
 function dataDiagnostic(table,row,field,code,...args){return {table,row,field,code,args};}
 function dataFailure(code,...args){const error=Error(code);error.code=code;error.args=args;throw error;}
+function dataFailureAt(row,field,code,...args){throw Object.assign(Error(code),{code,args,row,field});}
 function dataUnit(unit){const factors={minutes:1,seconds:1/60,hours:60};if(!Object.hasOwn(factors,unit))dataFailure('data_bad_unit',unit);return factors[unit];}
 function dataOffset(zone){if(zone==='Z')return zone;if(!/^[+-]\d{2}:\d{2}$/.test(zone||'')||Number(zone.slice(1,3))>23||Number(zone.slice(4))>59)dataFailure('data_bad_timezone',zone);return zone;}
 function dataDate(value,zone){
@@ -38,17 +39,17 @@ function dataCSV(text){
  const addCell=()=>{if(cell.length>DATA_LIMITS.cell)dataFailure('data_limit','cell');row.push(cell);cell='';closed=false;if(row.length>DATA_LIMITS.columns)dataFailure('data_limit','columns');};
  const addRow=()=>{addCell();if(row.some(v=>v!==''))rows.push({cells:row,line:rowLine});row=[];if(rows.length>DATA_LIMITS.rows+1)dataFailure('data_limit','rows');};
  for(let i=0;i<text.length;i++){
-  const c=text[i];if(quoted){if(c==='"'){if(text[i+1]==='"'){cell+='"';i++;}else{quoted=false;closed=true;}}else{cell+=c;if(c==='\n')line++;}}
-  else if(c==='"'){if(cell||closed)dataFailure('data_bad_csv',line);quoted=true;}
+  const c=text[i];if(quoted){if(c==='"'){if(text[i+1]==='"'){cell+='"';i++;}else{quoted=false;closed=true;}}else{cell+=c;if(c==='\n'||(c==='\r'&&text[i+1]!=='\n'))line++;}}
+  else if(c==='"'){if(cell||closed)dataFailureAt(line,'row','data_bad_csv',line);quoted=true;}
   else if(c===','){addCell();}
   else if(c==='\n'||c==='\r'){if(c==='\r'&&text[i+1]==='\n')i++;addRow();line++;rowLine=line;}
-  else {if(closed)dataFailure('data_bad_csv',line);cell+=c;}
+  else {if(closed)dataFailureAt(line,'row','data_bad_csv',line);cell+=c;}
   if(cell.length>DATA_LIMITS.cell)dataFailure('data_limit','cell');
  }
- if(quoted)dataFailure('data_bad_csv',line);if(cell||row.length||closed)addRow();
+ if(quoted)dataFailureAt(line,'row','data_bad_csv',line);if(cell||row.length||closed)addRow();
  if(!rows.length)dataFailure('data_empty');const headers=rows.shift().cells;
  if(headers.some(h=>!h)||new Set(headers).size!==headers.length)dataFailure('data_bad_header');
- for(const r of rows)if(r.cells.length!==headers.length)dataFailure('data_bad_csv',r.line);
+ for(const r of rows)if(r.cells.length!==headers.length)dataFailureAt(r.line,'row','data_bad_csv',r.line);
  return {headers,rows};
 }
 function dataCSVRecord(table,record,headers,mapping,options){
@@ -141,13 +142,14 @@ function prepareDataImport(request,progress=()=>{}){
  }else{
   let document;try{document=JSON.parse(text);}catch{dataFailure('data_bad_json');}
   if(!document||document.schema_version!==1||!['model','observations'].includes(document.kind))dataFailure('data_bad_schema');
-  kind=document.kind;const unit=document.time_unit||'minutes';dataUnit(unit);origin=document.time_origin||origin;
+  kind=document.kind;const unit=document.time_unit||'minutes';dataUnit(unit);origin=Object.hasOwn(document,'time_origin')?document.time_origin:origin;
   if(kind==='model'){
    if(!document.model||typeof document.model!=='object'||Array.isArray(document.model))dataFailure('data_bad_schema');candidate=dataCopy(document.model);
    const scale=dataUnit(unit);for(const key of ['duration','order_risk_window'])if(candidate[key]!=null){if(typeof candidate[key]!=='number')dataFailure('data_field_number',key);candidate[key]*=scale;}if(candidate.source?.interval!=null){if(typeof candidate.source.interval!=='number')dataFailure('data_field_number','interval');candidate.source.interval*=scale;}
    for(const t of Object.keys(DATA_FIELDS).filter(t=>t!=='observations')){if(candidate[t]!==undefined&&!Array.isArray(candidate[t])){diagnostics.push(dataDiagnostic(t,1,t,'data_invalid_value',t));continue;}const records=candidate[t]||[];if(rows.length+records.length>DATA_LIMITS.rows)dataFailure('data_limit','rows');rows.push(...records);for(let i=0;i<records.length;i++)try{convertDataTimes(records[i],t,unit,{...options,origin:candidate.time_origin});}catch(error){if(diagnostics.length<DATA_LIMITS.diagnostics)diagnostics.push(dataDiagnostic(t,i+1,'row',error.code||'data_invalid_value',...(error.args||[])));}}
   }else{if(!Array.isArray(document.events))dataFailure('data_bad_schema');events=dataCopy(document.events);rows=events;if(events.length>DATA_LIMITS.rows)dataFailure('data_limit','rows');for(let i=0;i<events.length;i++)try{convertDataTimes(events[i],'observations',unit,{...options,origin});}catch(error){if(diagnostics.length<DATA_LIMITS.diagnostics)diagnostics.push(dataDiagnostic('observations',i+1,'time',error.code||'data_invalid_value',...(error.args||[])));}}
  }
+ if(kind==='observations'&&origin!==undefined)try{dataDate(origin);}catch(error){diagnostics.push(dataDiagnostic('observations',1,'time_origin',error.code||'data_bad_timestamp',...(error.args||[])));}
  progress({phase:'validating',rows:rows.length});
  if(kind==='model')diagnostics.push(...validateDataModel(candidate,rowMap));else diagnostics.push(...validateObservations(events,baseModel,rowMap.observations));
  diagnostics=diagnostics.slice(0,DATA_LIMITS.diagnostics);if(diagnostics.length)return {ok:false,diagnostics};

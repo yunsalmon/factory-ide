@@ -25,6 +25,19 @@ with sync_playwright() as p:
   bad=f'id,kind,time,machine,state\nBAD,state,0,MISSING,idle'
   page.locator('#data-file').set_input_files({'name':'bad.csv','mimeType':'text/csv','buffer':bad.encode()});page.wait_for_function('()=>!DATA.busy&&DATA.headers.length>0');page.locator('#data-dry-run').click();page.wait_for_function('()=>!DATA.busy&&DATA.diagnostics.length>0')
   assert page.locator('#data-errors tbody tr').first.locator('td').nth(1).inner_text()=='2';assert 'Translation unavailable' not in page.locator('.data-panel').inner_text();assert page.evaluate('S.source')==source
+  # Numeric event times must not bypass document-origin validation (real Worker).
+  for origin in ['2026-02-30T00:00:00Z','not-rfc3339','2026-01-01T00:00:00+24:00']:
+   doc={'schema_version':1,'kind':'observations','time_origin':origin,'events':[{'id':'x','kind':'arrival','time':0,'lot':'L'}]}
+   page.locator('#data-file').set_input_files({'name':'origin.json','mimeType':'application/json','buffer':json.dumps(doc).encode()});page.wait_for_function('()=>!DATA.busy&&DATA.diagnostics.length>0')
+   assert page.evaluate('DATA.pending') is None;assert page.evaluate('DATA.diagnostics.some(d=>d.field==="time_origin"&&d.row===1)');assert page.evaluate('S.source')==source
+   assert 'Translation unavailable' not in page.locator('#data-errors').inner_text()
+  doc['time_origin']='2024-02-29T23:59:59.999+23:59'
+  page.locator('#data-file').set_input_files({'name':'valid-origin.json','mimeType':'application/json','buffer':json.dumps(doc).encode()});page.wait_for_function('()=>!DATA.busy&&DATA.pending?.ok');assert page.evaluate('DATA.pending.candidate.time_origin')==doc['time_origin']
+  page.locator('#data-table').select_option('processes')
+  for text,row in [('id,name\nP1,x\nP2,x,extra',3),('id,name\nP1,"line\ncontinued"\nP2,x,extra',4),('id,name\nP1,"line\ncontinued"x',3)]:
+   page.locator('#data-file').set_input_files({'name':'ragged.csv','mimeType':'text/csv','buffer':text.encode()});page.wait_for_function('()=>!DATA.busy&&DATA.diagnostics.length>0')
+   assert page.evaluate('DATA.diagnostics[0].row')==row;assert page.locator('#data-errors tbody tr').first.locator('td').nth(1).inner_text()==str(row)
+   assert page.evaluate('DATA.diagnostics[0].args[0]')==row;assert page.evaluate('S.source')==source;assert page.evaluate('DATA.pending') is None
   # Cancel before File.text resolves and terminate an actual running Worker.
   page.evaluate('()=>{readDataFile(new File(["id\\nx"],"cancel.csv"));cancelDataImport()}');page.wait_for_timeout(100);assert page.evaluate('!DATA.busy&&!DATA.pending&&DATA.text===null')
   page.evaluate('()=>{DATA.text="id\\n"+"x\\n".repeat(19000);DATA.format="csv";runDataWorker(true);cancelDataImport()}');page.wait_for_timeout(100);assert page.evaluate('!DATA.busy&&!DATA.pending&&DATA.worker===null')
