@@ -1166,6 +1166,7 @@ async function boot() {
       S.example = data.source;
       S.demoResult = copy(data.result);
       S.demoVersion = data.version;
+      let restoredPublicReplay = false;
       let source = data.source;
       try { source = localStorage.getItem("factory-studio.public.source.v1") || source; } catch {}
       setSource(source);
@@ -1180,13 +1181,17 @@ async function boot() {
         const saved = JSON.parse(localStorage.getItem("factory-studio.public.replay.v1"));
         if (saved?.source === source && saved.result?.schema_version === 2) {
           S.model = saved.result.model; S.result = saved.result; S.valid = true;
-          S.cursor = saved.cursor; S.tab = saved.tab || "events";
+          S.cursor = Number.isInteger(saved.cursor) && saved.cursor >= 0 && saved.cursor <= S.result.events.length ? saved.cursor : 1;
+          S.tab = saved.tab || "events";
           S.resultsFinal = saved.resultsFinal || false; S.resultFilters = saved.filters || {};
           S.warnings = S.result.warnings; S.warningMessages = S.result.warning_messages || [];
+          restoredPublicReplay = true;
         }
       } catch {}
       $("#project-name").textContent = S.model.name;
-      diagnostics(); renderTree(); renderGraph(); seek(S.result ? Math.max(1, S.cursor) : 0); selectTab(S.result ? S.tab : "console");
+      diagnostics(); renderTree(); renderGraph();
+      seek(S.result ? (restoredPublicReplay ? S.cursor : 1) : 0);
+      selectTab(S.result ? S.tab : "console");
       status({code: "public_ready"});
       return;
     }

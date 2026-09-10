@@ -184,20 +184,24 @@ js.eval("internalFetch('https://untrusted.invalid/factory-boundary-probe').catch
             wait_for(page, 'window.factoryStudio.getState().result?.execution?.kind === "precomputed"')
             assert page.locator('#code').input_value() == bundle['source']
 
-            # A browser execution of the unchanged example takes precedence over
-            # the precomputed fallback and restores its replay UI state.
+            # An unchanged-example browser execution takes precedence over the
+            # fallback and restores every meaningful replay boundary exactly.
             run(page)
-            page.evaluate('window.factoryStudio.pause(); seek(15)')
-            page.locator('[data-tab="results"]').click()
-            before_reload = page.evaluate('window.factoryStudio.getState()')
-            assert before_reload['result']['execution']['kind'] == 'browser'
-            assert before_reload['cursor'] == 15
-            page.reload()
-            wait_for(page, 'window.factoryStudio?.getState().eventCount > 0')
-            restored = page.evaluate('window.factoryStudio.getState()')
-            assert restored['result']['execution'] == before_reload['result']['execution']
-            assert restored['cursor'] == 15
-            expect(page.locator('[data-tab="results"]')).to_have_class('active')
+            executed = page.evaluate('window.factoryStudio.getState().result.execution')
+            assert executed['kind'] == 'browser'
+            event_count = page.evaluate('window.factoryStudio.getState().eventCount')
+            for cursor in [0, 1, event_count]:
+                page.evaluate('(cursor) => { window.factoryStudio.pause(); seek(cursor); }', cursor)
+                page.locator('[data-tab="results"]').click()
+                before_reload = page.evaluate('({studio: window.factoryStudio.getState(), prefix: stateAt()})')
+                assert before_reload['studio']['cursor'] == cursor
+                page.reload()
+                wait_for(page, 'window.factoryStudio?.getState().eventCount > 0')
+                restored = page.evaluate('({studio: window.factoryStudio.getState(), prefix: stateAt()})')
+                assert restored['studio']['result']['execution'] == executed
+                assert restored['studio']['cursor'] == cursor
+                assert restored['prefix'] == before_reload['prefix']
+                expect(page.locator('[data-tab="results"]')).to_have_class('active')
 
         for endpoint in ['/api/run', '/api/parse', '/api/bootstrap', '/api/jobs/fake']:
             response = page.request.post(base + endpoint, data={'source': "open('/tmp/factory-public-executed','w').write('bad')"}, headers={'Origin': 'https://untrusted.invalid'})
