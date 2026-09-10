@@ -1396,3 +1396,26 @@ dialog li {
 .view-switch button, .tabs button, .graph-footer span { white-space: normal; }
 .field > span { overflow-wrap: anywhere; }
 .allocation-state { min-width: 0; overflow-x: auto; }
+
+/* Operator WIP: horizontal scrolling is confined to accessible table regions. */
+.wip-dashboard { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.wip-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.wip-controls label { display: flex; flex-direction: column; gap: 5px; max-width: 100%; }
+.wip-controls :is(input,select) { min-width: 0; max-width: 100%; padding: 7px; }
+.wip-totals { display: flex; flex-wrap: wrap; gap: 24px; }
+.wip-totals dd { margin: 4px 0; font-size: 22px; font-weight: bold; }
+.wip-table-wrap { max-width: 100%; overflow-x: auto; margin: 16px 0; border: 1px solid #d9e3d9; }
+.wip-table-wrap table { width: 100%; white-space: nowrap; }
+.wip-table-wrap caption { text-align: start; padding: 10px; font-weight: bold; }
+.wip-dashboard button { min-height: 36px; }
+.wip-dashboard button[aria-pressed="true"] { outline: 2px solid #32855c; }
+#wip-detail details { padding: 12px; margin: 8px 0; background: #f5f8f2; }
+#wip-detail summary { cursor: pointer; font-weight: bold; }
+.wip-highlight .node-bg, .graph-terminal.wip-highlight { stroke: #b15b05; stroke-width: 3px; }
+.wip-highlight .route-path { stroke: #b15b05; stroke-width: 4px; }
+@media (max-width: 650px) {
+  .wip-controls label { flex: 1 1 130px; }
+  .wip-controls button { min-height: 44px; }
+  .wip-totals { gap: 14px; }
+  .wip-table-wrap th, .wip-table-wrap td { padding: 8px; }
+}

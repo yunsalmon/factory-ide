@@ -311,7 +311,7 @@ function renderGraph() {
   const { positions, groups, rows, width, height } = graphLayout();
   if (autoFit)
     S.zoom = Math.min(1.15, Math.max(0.38, ($("#graph-viewport").clientWidth - 12) / width));
-  const { lots, machines } = stateAt(),
+  const { lots, machines } = stateAt(S.tab === "wip" && WIP.finalView ? S.result?.events.length : S.cursor),
     active = S.result?.events[S.cursor - 1];
   const routeHistory = new Set(
     S.lot
@@ -349,7 +349,7 @@ function renderGraph() {
   for (const terminal of ["INPUT", "OUTPUT"]) {
     const p = positions[terminal],
       count = Object.values(lots).filter((l) => l.location === terminal).length;
-    svg += `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="8" class="graph-terminal"/><text x="${p.x + p.w / 2}" y="${p.y + 17}" text-anchor="middle" class="terminal-text">${terminal}</text><text x="${p.x + p.w / 2}" y="${p.y + 31}" text-anchor="middle" class="terminal-text">${count} lots</text>`;
+    svg += `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="8" class="graph-terminal" data-terminal="${terminal}"/><text x="${p.x + p.w / 2}" y="${p.y + 17}" text-anchor="middle" class="terminal-text">${terminal}</text><text x="${p.x + p.w / 2}" y="${p.y + 31}" text-anchor="middle" class="terminal-text">${count} lots</text>`;
   }
   for (const m of S.model.machines) {
     const p = positions[m.id],
@@ -363,6 +363,7 @@ function renderGraph() {
   svg += "</svg>";
   $("#graph").innerHTML = svg;
   $("#zoom-label").textContent = Math.round(S.zoom * 100) + "%";
+  highlightWipGraph();
   $$("[data-node]").forEach((g) => {
     g.onclick = () => inspectMachine(g.dataset.node);
     g.onkeydown = (e) => {
@@ -399,6 +400,7 @@ function renderPlayback() {
 }
 function selectTab(tab) {
   S.tab = tab;
+  renderGraph();
   $$("[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   renderTrace();
 }
@@ -414,6 +416,7 @@ function renderTrace() {
       `<div class="empty"><b>${tr("ui_68")}</b>${tr("ui_69")}<br>${tr("ui_70")}</div>`;
     return;
   }
+  if (S.tab === "wip") { renderInventory(); return; }
   if (S.tab === "results") { renderAllocationResults(); return; }
   if (S.tab === "allocations") { renderAllocationComparison(); return; }
   if (S.tab === "utilization") {
