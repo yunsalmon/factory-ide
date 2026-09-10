@@ -54,11 +54,45 @@ class ScenarioTests(unittest.TestCase):
   for e in r['events']:
    for lot in e['state_changes']['lots'].values():lot.pop('quantity',None)
   metrics=self.page.evaluate('r=>scenarioMetrics(r)',r);self.assertIsNone(metrics['processing_share']);self.assertIsNone(metrics['completed_quantity']);self.assertIsNone(metrics['late_orders'])
-  m=ordered_model();m['buffers']=[dict(id='IN',at='INPUT',capacity=1)];m['machines'][0]['availability']=[dict(state='down',start=0,end=10)];r=Factory(m).run()
+  m=ordered_model();m['buffers']=[dict(id='IN',at='INPUT',capacity=1),dict(id='OUT',at='OUTPUT',capacity=10)];m['machines'][0]['availability']=[dict(state='down',start=0,end=10)];r=Factory(m).run()
   metrics=self.page.evaluate('r=>scenarioMetrics(r)',r);buf=copy.deepcopy(r['initial_state']['buffers']);last=0;full=0
   for e in r['events']:
    if len(buf['IN']['contents'])==1:full+=e['time']-last
    buf.update(e['state_changes']['buffers']);last=e['time']
   if len(buf['IN']['contents'])==1:full+=r['summary']['horizon']-last
   self.assertEqual(metrics['buffer:IN'],full)
+ def restored_metrics(self, result):
+  # Valid hashes deliberately describe incomplete measurements, not corrupted hashes.
+  return self.page.evaluate('async result=>{const a=await scenarioCreate("measurements","","MODEL = {}",result);const restored=await scenarioRestore(JSON.parse(JSON.stringify(scenarioArtifact([a,a],0,1))));return scenarioCompare(...restored.items);}',result)
+ def test_missing_buffer_evidence_after_valid_hash_roundtrip(self):
+  m=ordered_model();m['buffers']=[dict(id='IN',at='INPUT',capacity=1),dict(id='OUT',at='OUTPUT',capacity=10)];m['machines'][0]['availability']=[dict(state='down',start=0,end=10)]
+  trace=Factory(m).run();valid={x['key']:x for x in self.restored_metrics(trace)['metrics']};self.assertEqual(valid['buffer:IN']['baseline'],13)
+  for mode in ['contents','null_contents','entire_buffer','single_interval']:
+   damaged=copy.deepcopy(trace)
+   snapshots=[damaged['initial_state']['buffers']]+[e['state_changes']['buffers'] for e in damaged['events']]
+   if mode=='single_interval':snapshots=[next(e['state_changes']['buffers'] for e in damaged['events'] if e['state_changes']['buffers'].get('IN',{}).get('contents'))]
+   for snapshot in snapshots:
+    if 'IN' not in snapshot:continue
+    if mode=='entire_buffer':snapshot.pop('IN')
+    elif mode=='null_contents':snapshot['IN']['contents']=None
+    else:snapshot['IN'].pop('contents',None)
+   rows={x['key']:x for x in self.restored_metrics(damaged)['metrics']}
+   for key in ['buffer:IN','buffer_full']:
+    self.assertIsNone(rows[key]['baseline'],mode);self.assertIsNone(rows[key]['candidate']);self.assertIsNone(rows[key]['delta'])
+ def test_missing_machine_or_state_preserves_expected_denominator(self):
+  from test_operations import line
+  trace=Factory(line()).run();rows={x['key']:x for x in self.restored_metrics(trace)['metrics']};self.assertAlmostEqual(rows['processing_share']['baseline'],.15)
+  for mode in ['machine','processing','idle','down']:
+   damaged=copy.deepcopy(trace)
+   if mode=='machine':damaged['operation_metrics']['machines'].pop('N')
+   else:damaged['operation_metrics']['machines']['N'].pop(mode)
+   rows={x['key']:x for x in self.restored_metrics(damaged)['metrics']}
+   self.assertIsNone(rows['processing_share']['baseline'],mode);self.assertIsNone(rows['processing_share']['delta'])
+   self.assertIsNone(rows['state:N:'+('processing' if mode=='machine' else mode)]['baseline'])
+ def test_complete_empty_measurements_are_true_zero(self):
+  from test_operations import line
+  m=line();m['orders']=[];m['buffers']=[dict(id='IN',at='INPUT',capacity=1)];trace=Factory(m).run()
+  rows={x['key']:x for x in self.restored_metrics(trace)['metrics']}
+  for key in ['buffer:IN','buffer_full','processing_share']:
+   self.assertEqual(rows[key]['baseline'],0);self.assertEqual(rows[key]['candidate'],0);self.assertEqual(rows[key]['delta'],0)
 if __name__=='__main__':unittest.main()

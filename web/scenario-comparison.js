@@ -42,12 +42,42 @@ function scenarioMetrics(r){
   const cycles=Object.values(states).filter(l=>l.state==='completed').map(l=>Number.isFinite(l.completed)&&Number.isFinite(l.released_at??l.created)?l.completed-(l.released_at??l.created):null);
   m.cycle_mean=cycles.length&&cycles.every(x=>x!==null)?cycles.reduce((s,x)=>s+x,0)/cycles.length:null;
   if(r.order_plan?.length){const due=orderProjection(r,r.events.length,{finalView:true}).rows.filter(o=>o.due_time!==null);m.late_orders=due.length?due.filter(o=>o.tardiness>0).length:null;m.tardiness=due.length?due.reduce((s,o)=>s+o.tardiness,0):null;}else{m.late_orders=null;m.tardiness=null;}
-  if(r.operation_metrics?.machines)for(const [id,v] of Object.entries(r.operation_metrics.machines))for(const [state,time] of Object.entries(v))m['state:'+id+':'+state]=Number.isFinite(time)?time/h:null;
-  const operationValues=Object.values(r.operation_metrics?.machines||{});m.processing_share=operationValues.length&&operationValues.every(v=>Number.isFinite(v.processing))?operationValues.reduce((s,v)=>s+v.processing,0)/h/operationValues.length:null;
+  // Complete coverage is required: an omitted machine/state cannot shrink the denominator.
+  const expectedMachines=new Set(r.model.machines.map(x=>x.id));
+  for(const id of Object.keys(r.initial_state?.machine_operations||{}))expectedMachines.add(id);
+  for(const e of r.events)for(const id of Object.keys(e.state_changes.machine_operations||{}))expectedMachines.add(id);
+  const opStates=['idle','reserved','processing','setup','down','blocked','starved','offshift',...(r.operational_schema_version===1?[]:['maintenance','resource_wait'])];
+  const observed=r.operation_metrics?.machines||{};
+  let complete=expectedMachines.size>0&&r.operation_metrics?.horizon===h,processing=0;
+  for(const id of expectedMachines){
+    const values=observed[id];
+    let machineComplete=!!values;
+    for(const state of opStates){const value=values?.[state];const valid=Number.isFinite(value)&&value>=0;m['state:'+id+':'+state]=valid?value/h:null;machineComplete&&=valid;}
+    if(machineComplete)machineComplete=Math.abs(opStates.reduce((sum,state)=>sum+values[state],0)-h)<=Math.max(1e-9,h*1e-12);
+    complete&&=machineComplete;if(machineComplete)processing+=values.processing;
+  }
+  m.processing_share=complete?processing/h/expectedMachines.size:null;
+  // Discover expected buffers before integrating. Missing initial/delta snapshots
+  // remain unknown over their intervals, even when later measurements resume.
+  const definitions=new Map((r.model.buffers||[]).map(b=>[b.id,b.capacity??null]));
+  const expectedBuffers=new Set(definitions.keys());
+  const snapshots=[r.initial_state?.buffers||{},...r.events.map(e=>e.state_changes.buffers||{})];
+  for(const changes of snapshots)for(const [id,b] of Object.entries(changes)){expectedBuffers.add(id);if(b&&Object.hasOwn(b,'capacity')&&!definitions.has(id))definitions.set(id,b.capacity);}
   const buffers=Object.assign(Object.create(null),r.initial_state?.buffers),full=Object.create(null);let at=0;
-  function interval(until){for(const [id,b] of Object.entries(buffers)){if(!Object.hasOwn(full,id))full[id]=Number.isFinite(b.capacity)?0:null;if(Number.isFinite(b.capacity)&&Array.isArray(b.contents)&&b.contents.length>=b.capacity)full[id]+=until-at;}at=until;}
-  for(const e of r.events){interval(e.time);Object.assign(buffers,e.state_changes.buffers);}interval(h);for(const [id,time]of Object.entries(full))m['buffer:'+id]=time;
-  const finite=Object.values(full).filter(x=>x!==null);m.buffer_full=finite.length?finite.reduce((s,x)=>s+x,0):null;
+  for(const id of expectedBuffers)full[id]=Number.isFinite(definitions.get(id))?0:null;
+  function interval(until){
+    if(until>at)for(const id of expectedBuffers){
+      const b=buffers[id],capacity=definitions.get(id);
+      if(!Number.isFinite(capacity))continue;
+      if(!b||!Array.isArray(b.contents)||b.capacity!==capacity){full[id]=null;continue;}
+      if(full[id]!==null&&b.contents.length>=capacity)full[id]+=until-at;
+    }
+    at=until;
+  }
+  for(const e of r.events){interval(e.time);Object.assign(buffers,e.state_changes.buffers);}interval(h);
+  for(const id of expectedBuffers)m['buffer:'+id]=full[id];
+  const finite=[...expectedBuffers].filter(id=>Number.isFinite(definitions.get(id)));
+  m.buffer_full=finite.length&&finite.every(id=>full[id]!==null)?finite.reduce((sum,id)=>sum+full[id],0):null;
   const machines=new Map(r.model.machines.map(x=>[x.id,x]));m.cross_line=0;
   for(const e of r.events.filter(e=>e.kind==='move')){const a=machines.get(e.lot?.location),b=machines.get(e.lot?.target);if(a&&b){if(!a.line||!b.line){m.cross_line=null;break;}if(a.line!==b.line)m.cross_line++;}}
   return m;

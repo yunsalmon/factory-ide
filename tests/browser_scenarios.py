@@ -14,7 +14,7 @@ with sync_playwright() as p:
   for lang in ['ko','en','ja']:
    context=browser.new_context(locale=lang,viewport={'width':320 if mobile else 1500,'height':844 if mobile else 1100},is_mobile=mobile,has_touch=mobile);page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)));page.goto(base);page.wait_for_function('()=>window.factoryStudio?.getState().valid')
    for name,duration in [('Baseline',1),('Candidate',25)]:
-    m=ordered_model();m['machines'][0]['time']=duration;source='MODEL = '+repr(m)
+    m=ordered_model();m['buffers']=[dict(id='IN',at='INPUT',capacity=1)];m['machines'][0]['time']=duration;source='MODEL = '+repr(m)
     page.evaluate('(s)=>editor.setValue(s)',source);page.wait_for_function('()=>S.valid&&!S.busy&&!S.job');page.locator('[data-tab="scenarios"]').click();page.locator('#sc-name').fill(name);page.locator('#sc-notes').fill('raw 사용자 日本語');page.locator('#sc-run').click()
     page.wait_for_function('(count)=>SCENARIOS.items.length===count&&!SCENARIOS.busy',arg=1 if name=='Baseline' else 2,timeout=90000)
    assert page.locator('#sc-error').inner_text()==''
@@ -33,6 +33,10 @@ with sync_playwright() as p:
    page.locator('[data-tab="scenarios"]').click();bad=json.loads(raw);bad['scenarios'][0]['source']+='\n# changed'
    page.locator('#sc-import').set_input_files({'name':'bad.json','mimeType':'application/json','buffer':json.dumps(bad).encode()});expect(page.locator('#sc-error')).not_to_be_empty();assert page.evaluate('SCENARIOS.items.length')==2
    page.reload();page.wait_for_function('()=>window.factoryStudio?.getState().valid');page.locator('[data-tab="scenarios"]').click();page.wait_for_function('()=>SCENARIOS.items.length===2');assert page.evaluate('scenarioCompare(SCENARIOS.items[0],SCENARIOS.items[1]).metrics.find(x=>x.key==="completed_lots").delta')<0
-   assert errors==[],errors;print('PASS scenarios',lang,'mobile' if mobile else 'desktop',flush=True);context.close()
+   for metric in ['buffer_full','processing_share']:
+    artifact=page.evaluate('async metric=>{const original=SCENARIOS.items[0];const result=structuredClone(original.result);if(metric==="buffer_full"){for(const snapshots of [result.initial_state.buffers,...result.events.map(e=>e.state_changes.buffers)])for(const b of Object.values(snapshots))delete b.contents;}else{delete result.operation_metrics.machines[result.model.machines[0].id];}const damaged=await scenarioCreate("missing "+metric,"",original.source,result,original.runtime);return JSON.stringify(scenarioArtifact([original,damaged],0,1));}',metric)
+    page.locator('#sc-import').set_input_files({'name':'incomplete.json','mimeType':'application/json','buffer':artifact.encode()});page.wait_for_function('(metric)=>SCENARIOS.items[1]?.name==="missing "+metric',arg=metric)
+    row=page.locator('[data-sc-metric="'+metric+'"] td');expect(row.nth(1)).to_have_text(page.evaluate('tr("sc_unavailable")'));expect(row.nth(2)).to_have_text(page.evaluate('tr("sc_unavailable")'))
+   assert errors==[],errors;print('PASS scenarios' ,lang,'mobile' if mobile else 'desktop',flush=True);context.close()
  browser.close()
 if server:server.terminate()
