@@ -63,6 +63,8 @@ def validate(model):
         if not isinstance(r.get('enabled'), bool) or not isinstance(r.get('product'), str):
             raise ModelError(message('message_19' ,r['id']))
     validate_operations(model)
+    from orders import normalize_orders
+    normalize_orders(model)
     # Cycles may represent rework, so retain them. Surface unreachable nodes as warnings.
     reachable = {'INPUT'}
     for _ in range(len(mids) + 1):

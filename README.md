@@ -172,3 +172,10 @@ change alone does not establish that the external HTTPS deployment is live or ac
 ## WIP 현황판
 
 실행 후 **WIP 현황판** 탭에서 현재 재생 이벤트까지의 로트를 공정·라인·위치별로 확인합니다. 최종 상태 보기는 재생 커서와 별도로 표시합니다. 필터·검색, 그룹/로트 선택에 따른 공정도 강조, 커서까지의 이력과 선택 이유, 표시 로트 CSV 내보내기를 지원합니다. 수량·출하 지시 시각이 모델에 없으면 값을 만들지 않습니다. 현재 추정 대기열과 향후 명시적 버퍼를 연결하는 계약 및 집계 기준은 [WIP projection](docs/inventory-projection.md)에 설명합니다.
+### Order planning
+
+The **Order planner** tab adds optional order quantities, split lots, scheduled releases,
+business priority and due-date tracking without changing legacy generated supply.
+Try `examples/orders_demo.py`; use the tab's JSON plan editor/import/export and filtered CSV.
+See [order schema, replay metrics and dispatch contract](docs/orders.md) for time/date
+semantics, finite INPUT admission, localized validation and tests.

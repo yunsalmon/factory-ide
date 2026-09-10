@@ -1,5 +1,6 @@
 """Deterministic SimPy factory runtime with auditable routing decisions."""
 from messages import message, descriptor
+from orders import normalize_orders
 import copy
 import random
 import simpy
@@ -34,6 +35,9 @@ class Factory:
         self.last_buffers = copy.deepcopy(self.buffers)
         self.last_operations = copy.deepcopy(self.operations)
         self.source_pending = None
+        self.order_plan = normalize_orders(model)
+        self.order_headers = {o["id"]: {k: copy.deepcopy(v) for k, v in o["raw"].items() if k != "lots"} for o in self.order_plan}
+        self.order_pending = set()
         if process and any(m.get('availability') for m in self.machines.values()):
             raise ModelError('Custom process_lot cannot be combined with availability windows; use processing_time for pausable work')
 
@@ -91,7 +95,10 @@ class Factory:
                 if place['kind'] == 'machine':
                     assert self.busy[place['id']] == lid, (lid, place)
                 else:
-                    assert place['kind'] == 'transport', (lid, place)
+                    assert place['kind'] in ('transport', 'release'), (lid, place)
+                    if place['kind'] == 'release':
+                        assert place['id'] == 'INPUT' and lot['state'] == 'release_pending', (lid, place)
+                        assert lid not in self.busy.values(), lid
         assert set(members) <= set(self.lots)
         claims = [lid for lid in self.busy.values() if lid]
         assert len(claims) == len(set(claims)) and set(claims) <= set(self.lots)
@@ -215,13 +222,19 @@ class Factory:
                                priority=r['priority'], ready_since=lot['ready_since'],
                                buffer_id=lot['placement']['id'], lot_priority=lot['priority'],
                                buffer_rank=self.buffers[lot['placement']['id']]['contents'].index(lot['id']),
+                               order_id=lot.get('order_id'), quantity=lot.get('quantity'),
+                               release_time=lot.get('release_time'), due_time=lot.get('due_time'),
+                               due_date=lot.get('due_date'), customer=lot.get('customer'), reference=lot.get('reference'),
+                               order=copy.deepcopy(lot.get('order')),
+                               due_slack=None if lot.get('due_time') is None else lot['due_time'] - self.env.now,
                                product=lot['product'], **{'from': r['from'], 'to': r['to']},
                                same_line=bool(origin and destination and origin['line'] == destination['line']),
                                queue_length=sum(l['state'] != 'completed' and l.get('target') == r['to'] for l in self.lots.values()) + int(bool(self.busy.get(r['to'])))))
         return result, checks
 
     def decide(self, candidates, checks, context, lot=None, output_choice=False):
-        selected, reason = self.choose(copy.deepcopy(candidates), dict(context, now=self.env.now, mode=self.model['mode'], rng=self.rng))
+        selected, reason = self.choose(copy.deepcopy(candidates), dict(copy.deepcopy(context), now=self.env.now, mode=self.model['mode'], rng=self.rng,
+                    orders=copy.deepcopy(self.order_headers)))
         chosen = next((c for c in candidates if c['id'] == selected), None)
         if (selected is not None and chosen is None) or not isinstance(reason, str) or not reason.strip():
             raise ModelError(message('message_32'))
@@ -231,6 +244,8 @@ class Factory:
         self.emit('decision', lot, chosen=chosen['id'] if chosen else None, candidates=candidates, checks=checks,
                   reason=reason, machine=context.get('machine', {}).get('id'), route=chosen['route_id'] if chosen else None,
                   decision_mode=self.model['mode'], allocation_id=allocation_id,
+                  selection_policy='default_route' if self.choose == self.default_choose else 'custom',
+                  order_factors_used=False if self.choose == self.default_choose else None,
                   outcome='route_preference' if preference else 'selected' if chosen else 'declined')
         if not chosen:
             return None, lot
@@ -272,6 +287,33 @@ class Factory:
             if route['to'] == 'OUTPUT':
                 self.env.process(self.ship(lot, route))
         self.wake()
+
+    def supply_orders(self):
+        # Stable input order breaks equal-time ties without rewriting order IDs.
+        planned = [lot for order in self.order_plan for lot in order['lots']]
+        for plan in sorted(planned, key=lambda lot: lot['release_time']):
+            if plan['release_time'] > self.env.now:
+                yield self.env.timeout(plan['release_time'] - self.env.now)
+            self.env.process(self.release_order_lot(plan))
+
+    def release_order_lot(self, plan):
+        # Release is an external supply boundary, not admission to finite INPUT.
+        lot = dict(copy.deepcopy(plan), order=copy.deepcopy(self.order_headers[plan['order_id']]),
+                   scheduled=plan['release_time'], released_at=self.env.now,
+                   created=self.env.now, ready_since=self.env.now, location='INPUT',
+                   state='release_pending', placement=dict(kind='release', id='INPUT'),
+                   target=None, route=None)
+        self.lots[lot['id']] = lot
+        self.order_pending.add(lot['id'])
+        self.emit('order_release', lot, allocation_id=None)
+        bid = self.buffer_at['INPUT']
+        while not self.has_space(bid):
+            yield self.changed
+        self.order_pending.remove(lot['id'])
+        lot.update(state='waiting', admitted_at=self.env.now, ready_since=self.env.now)
+        self.enqueue(lot, bid)
+        self.emit('arrival', lot)
+        self.ready(lot)
 
     def supply(self):
         source = self.model['source']
@@ -425,7 +467,7 @@ class Factory:
         return diagnostics
 
     def run(self):
-        self.env.process(self.supply())
+        self.env.process(self.supply_orders() if 'orders' in self.model else self.supply())
         for machine in self.machines.values():
             self.env.process(self.machine_calendar(machine))
             self.env.process(self.machine(machine))
@@ -436,8 +478,12 @@ class Factory:
         warnings = validate(self.model)
         if len(completed) < len(self.lots):
             warnings.append(message('message_36' ,len(self.lots) - len(completed)))
+        diagnostics = self.diagnose()
+        if self.order_pending:
+            diagnostics.append(dict(code='order_release_backpressure', lots=sorted(self.order_pending)))
         return dict(schema_version=2, operational_schema_version=1, initial_state=self.initial_state,
-                    operational_diagnostics=self.diagnose(), allocations=self.allocations, events=self.events, model=self.model, warnings=warnings, warning_messages=[descriptor(w) for w in warnings],
+                    order_schema_version=1, order_plan=self.order_plan,
+                    operational_diagnostics=diagnostics, allocations=self.allocations, events=self.events, model=self.model, warnings=warnings, warning_messages=[descriptor(w) for w in warnings],
                     summary=dict(completed=len(completed), arrived=len(self.lots), horizon=self.model['duration'],
                                  mean_cycle_time=sum(l['completed'] - l['created'] for l in completed) / len(completed) if completed else 0))
 

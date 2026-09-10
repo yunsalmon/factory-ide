@@ -1419,3 +1419,20 @@ dialog li {
   .wip-totals { gap: 14px; }
   .wip-table-wrap th, .wip-table-wrap td { padding: 8px; }
 }
+.order-planner { min-width:0; max-width:100%; overflow-wrap:anywhere; }
+.order-controls { display:flex; flex-wrap:wrap; align-items:end; gap:10px; }
+.order-controls label { display:flex; flex-direction:column; gap:4px; max-width:100%; }
+.order-controls :is(select,input) { min-width:0; max-width:100%; padding:6px; }
+.order-totals { display:flex; flex-wrap:wrap; gap:16px; }
+.order-totals dd { margin:4px 0; font-weight:bold; font-size:20px; }
+.order-table-wrap { max-width:100%; overflow-x:auto; border:1px solid #d9e3d9; }
+.order-table-wrap table { white-space:nowrap; width:100%; }
+.order-table-wrap caption { padding:10px; text-align:start; }
+.order-planner button { min-height:36px; }
+.order-planner button[aria-pressed="true"] { outline:2px solid #32855c; }
+#order-detail details { padding:10px; margin:10px 0; background:#f5f8f2; }
+#order-detail summary { cursor:pointer; font-weight:bold; }
+.order-editor { width:min(800px,90vw); max-height:90vh; overflow:auto; }
+.order-editor textarea { width:100%; font-family:monospace; }
+.order-editor label { display:block; }
+@media(max-width:650px){.order-controls label { flex:1 1 130px; }.order-controls button { min-height:44px; }}
