@@ -20,6 +20,8 @@ class Factory:
         self.lots = {}
         self.events = []
         self.changed = self.env.event()
+        self.allocations = []
+        self.last_machines = {}
 
     @staticmethod
     def default_choose(candidates, context):
@@ -29,7 +31,16 @@ class Factory:
     def emit(self, kind, lot, **extra):
         if len(self.events) >= 50000:
             raise ModelError('이벤트 한도(50,000)를 초과했습니다. 실행 시간이나 로트 수를 줄이세요.')
-        self.events.append(dict(index=len(self.events), time=self.env.now, kind=kind, lot=copy.deepcopy(lot), **extra))
+        machines = {}
+        for mid, lid in self.busy.items():
+            state = 'processing' if lid and self.lots[lid]['state'] == 'processing' else 'reserved' if lid else 'idle'
+            value = dict(state=state, lot=lid)
+            if self.last_machines.get(mid) != value:
+                machines[mid] = value
+        self.last_machines.update(copy.deepcopy(machines))
+        self.events.append(copy.deepcopy(dict(index=len(self.events), time=self.env.now,
+            kind=kind, lot=lot, allocation_id=lot.get('allocation_id'),
+            state_changes=dict(lots={lot['id']: lot}, machines=machines), **extra)))
 
     def wake(self):
         previous, self.changed = self.changed, self.env.event()
@@ -68,26 +79,43 @@ class Factory:
     def decide(self, candidates, checks, context, lot=None):
         selected, reason = self.choose(copy.deepcopy(candidates), dict(context, now=self.env.now, mode=self.model['mode'], rng=self.rng))
         chosen = next((c for c in candidates if c['id'] == selected), None)
-        if chosen is None or not isinstance(reason, str) or not reason.strip():
+        if (selected is not None and chosen is None) or not isinstance(reason, str) or not reason.strip():
             raise ModelError('choose_candidate는 전달받은 후보 id와 비어 있지 않은 이유를 반환해야 합니다.')
-        lot = lot or self.lots[chosen['lot_id']]
-        self.emit('decision', lot, chosen=chosen['id'], candidates=candidates, checks=checks,
-                  reason=reason, machine=context.get('machine', {}).get('id'), route=chosen['route_id'],
-                  decision_mode=self.model['mode'])
+        lot = lot or self.lots[(chosen or candidates[0])['lot_id']]
+        allocation_id = f'ALLOC-{len(self.allocations) + 1:06d}' if chosen else None
+        self.emit('decision', lot, chosen=chosen['id'] if chosen else None, candidates=candidates, checks=checks,
+                  reason=reason, machine=context.get('machine', {}).get('id'), route=chosen['route_id'] if chosen else None,
+                  decision_mode=self.model['mode'], proposed_allocation_id=allocation_id)
+        if not chosen:
+            return None, lot
+        self.allocations.append(dict(id=allocation_id, lot_id=lot['id'], destination=chosen['to'],
+            route_id=chosen['route_id'], mode=self.model['mode'], decision_index=len(self.events) - 1,
+            before_cursor=len(self.events) - 1, after_cursor=None))
+        # The decision records the new identity; the previous lot allocation is historical.
+        self.events[-1]['allocation_id'] = allocation_id
+        lot['allocation_id'] = allocation_id
         return next(r for r in self.model['routes'] if r['id'] == chosen['route_id']), lot
 
+    def assign(self, lot, route, reservation=False):
+        lot.update(target=route['to'], assigned_route=route['id'])
+        if reservation:
+            self.busy[route['to']] = lot['id']
+        self.emit('assigned', lot, route=route['id'],
+                  assignment_kind='reservation' if reservation else 'shipment' if route['to'] == 'OUTPUT' else 'queue')
+        self.allocations[-1]['after_cursor'] = len(self.events)
+
     def ready(self, lot):
-        lot.update(state='waiting', ready_since=self.env.now, target=None, route=None)
+        lot.update(state='waiting', ready_since=self.env.now, target=None, route=None, assigned_route=None, allocation_id=None)
         self.emit('ready', lot)
         candidates, checks = self.candidates(lot)
         if not candidates:
             self.emit('blocked', lot, checks=checks, reason='선택 가능한 출고 경로가 없습니다.')
         elif self.model['mode'] == 'push' or any(c['to'] == 'OUTPUT' for c in candidates):
             route, _ = self.decide(candidates, checks, {'lot': copy.deepcopy(lot)}, lot)
-            lot['target'] = route['to']
-            # Keep the exact chosen edge: parallel routes can have different delays.
-            lot['assigned_route'] = route['id']
-            self.emit('assigned', lot, route=route['id'])
+            if route is None:
+                self.wake()
+                return
+            self.assign(lot, route)
             if route['to'] == 'OUTPUT':
                 self.env.process(self.ship(lot, route))
         self.wake()
@@ -128,6 +156,10 @@ class Factory:
                 continue
             if self.model['mode'] == 'pull':
                 route, lot = self.decide(candidates, checks, {'machine': copy.deepcopy(machine)})
+                if route is None:
+                    yield self.changed
+                    continue
+                self.assign(lot, route, reservation=True)
             else:
                 selected = min(candidates, key=lambda c: (c['ready_since'], c['id']))
                 lot = self.lots[selected['lot_id']]
@@ -162,7 +194,7 @@ class Factory:
         warnings = validate(self.model)
         if len(completed) < len(self.lots):
             warnings.append(f'{len(self.lots) - len(completed)}개 로트가 종료 시점에 미완료입니다. 대기·처리 중이거나 경로가 막혀 있을 수 있습니다.')
-        return dict(events=self.events, model=self.model, warnings=warnings,
+        return dict(schema_version=2, allocations=self.allocations, events=self.events, model=self.model, warnings=warnings,
                     summary=dict(completed=len(completed), arrived=len(self.lots), horizon=self.model['duration'],
                                  mean_cycle_time=sum(l['completed'] - l['created'] for l in completed) / len(completed) if completed else 0))
 

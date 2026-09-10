@@ -1363,3 +1363,14 @@ dialog li {
 .code-error-line {
   background: #ffeded;
 }
+
+.allocation-comparison { padding: 16px; }
+.allocation-comparison select { max-width: 100%; }
+.allocation-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.allocation-state { min-width: 0; overflow: auto; border: 1px solid #dce6d6; padding: 10px; }
+.allocation-state table { min-width: 0; }
+.allocation-state td { white-space: normal; overflow-wrap: anywhere; }
+.allocation-state p { font-size: 12px; }
+.state-changed { background: #fff0c2; }
+.machine-node.processing .node-bg { stroke: #51a277; }
+@media (max-width: 700px) { .allocation-pair { grid-template-columns: 1fr; } }

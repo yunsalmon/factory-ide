@@ -217,20 +217,43 @@ function renderTree() {
   $$("[data-machine]").forEach((b) => (b.onclick = () => inspectMachine(b.dataset.machine)));
   $$("[data-process]").forEach((b) => (b.onclick = () => inspectProcess(b.dataset.process)));
 }
+// Replay uses event order, never timestamps; returned objects cannot mutate the trace.
 function stateAt(cursor = S.cursor) {
-  const lots = {},
-    machines = {};
+  const lots = {}, machines = {};
+  for (const m of S.result?.model.machines || []) machines[m.id] = {state: "idle", lot: null};
   for (const e of S.result?.events.slice(0, cursor) || []) {
-    lots[e.lot.id] = e.lot;
-    if (e.machine && ["move", "start"].includes(e.kind))
-      machines[e.machine] = {
-        lot: e.lot.id,
-        state: e.kind === "move" ? "moving" : "busy",
-        since: e.time,
-      };
-    if (e.machine && e.kind === "finish") delete machines[e.machine];
+    Object.assign(lots, copy(e.state_changes?.lots || {[e.lot.id]: e.lot}));
+    Object.assign(machines, copy(e.state_changes?.machines || {}));
   }
-  return { lots, machines, time: cursor ? S.result.events[cursor - 1].time : 0 };
+  const queues = {};
+  const reserved = new Set(Object.values(machines).filter(m => m.state !== "idle").map(m => m.lot));
+  for (const id of ["INPUT", ...(S.result?.model.machines.map(m => m.id) || []), "OUTPUT"])
+    queues[id] = Object.values(lots).filter(l => l.state === "waiting" && !reserved.has(l.id) && (l.target || l.location) === id)
+      .sort((a,b) => a.ready_since - b.ready_since || a.id.localeCompare(b.id)).map(l => l.id);
+  return {lots, machines, queues, time: cursor ? S.result.events[cursor - 1].time : 0};
+}
+function renderAllocationComparison() {
+  const records = S.result.events.filter(e => ["decision", "blocked"].includes(e.kind));
+  const current = records.find(e => e.index === S.comparison);
+  const select = `<label>선택 기록 <select id="allocation-select" aria-label="할당 선택"><option value="">기록 선택</option>${records.map(e => `<option value="${e.index}" ${e === current ? "selected" : ""}>#${e.index} · ${fmt(e.time)}m · ${esc(e.allocation_id || (e.kind === "blocked" ? "경로 없음" : "미선택"))} · ${esc(e.lot.id)}</option>`).join("")}</select></label>`;
+  const container = $("#trace-content");
+  container.innerHTML = `<div class="allocation-comparison">${select}<div id="allocation-detail"></div></div>`;
+  $("#allocation-select").onchange = e => {
+    if (e.target.value !== "") { pause(); seek(Number(e.target.value) + 1); }
+  };
+  if (!current) { $("#allocation-detail").textContent = "재생 시점의 선택 기록이 없습니다. 기록을 선택해 전후를 비교하세요."; return; }
+  const allocation = S.result.allocations.find(a => a.id === current.allocation_id);
+  const beforeCursor = allocation?.before_cursor ?? current.index;
+  const afterCursor = allocation?.after_cursor ?? current.index + 1;
+  const before = stateAt(beforeCursor), after = stateAt(afterCursor);
+  const labels = {waiting:"대기", moving:"이동 중", processing:"처리 중", completed:"완료", idle:"유휴", reserved:"예약"};
+  function panel(state, other, title, cursor) {
+    const row = (value, previous, content) => `<tr class="${JSON.stringify(value) !== JSON.stringify(previous) ? "state-changed" : ""}">${content}</tr>`;
+    return `<section class="allocation-state"><h3>${title} · 커서 ${cursor}</h3><h4>로트 위치 · 상태 · 배정 목적지</h4><table><thead><tr><th>로트</th><th>위치</th><th>상태</th><th>목적지</th></tr></thead><tbody>${Object.values(state.lots).map(l => row(l, other.lots[l.id], `<td>${esc(l.id)}</td><td>${esc(l.location)}</td><td>${labels[l.state]}</td><td>${esc(l.target || "미배정")}</td>`)).join("")}</tbody></table><h4>머신</h4><table><thead><tr><th>머신</th><th>상태</th><th>로트</th></tr></thead><tbody>${Object.entries(state.machines).map(([id,m]) => row(m, other.machines[id], `<td>${esc(id)}</td><td>${labels[m.state]}</td><td>${esc(m.lot || "—")}</td>`)).join("")}</tbody></table><h4>대기 목록 (준비 시각 · ID 순서)</h4><p>배정된 로트는 목적지 큐, 미배정 로트는 현재 위치에 표시합니다. 예약 로트는 머신에 표시합니다.</p><table><thead><tr><th>위치 / 목적지</th><th>개수</th><th>순서</th></tr></thead><tbody>${Object.entries(state.queues).map(([id,q]) => row(q, other.queues[id], `<td>${esc(id)}</td><td>${q.length}</td><td>${q.map(esc).join(" → ") || "—"}</td>`)).join("")}</tbody></table></section>`;
+  }
+  $("#allocation-detail").innerHTML = `<h3>${esc(allocation?.id || "할당 없음")} · ${esc(allocation?.destination || "미선택 / 경로 없음")}</h3><p>선택 이유: ${esc(current.reason)} · 현재 재생 커서 ${S.cursor}</p><p>강조한 행은 전후 변경 항목입니다. 할당 후는 이동 시작 전입니다.</p><button id="allocation-before">할당 전으로 이동</button> <button id="allocation-after">할당 후로 이동</button><div class="allocation-pair">${panel(before, after, "할당 전", beforeCursor)}${panel(after, before, allocation ? "할당 후" : "선택 기록 후 · 할당 없음", afterCursor)}</div><h3>선택 후보 / 조건 제외</h3>${(current.candidates || []).map(c => `<div class="info-card ${c.id === current.chosen ? "selected" : ""}"><b>${c.id === current.chosen ? "선택" : "미선택 (개별 사유 미제공)"} · ${esc(c.lot_id)} / ${esc(c.route_id)}</b>${esc(c.from)} → ${esc(c.to)} · 우선순위 ${c.priority} · 대기 ${c.queue_length}</div>`).join("")}${(current.checks || []).filter(c => !c.eligible).map(c => `<div class="info-card rejected">조건 제외 · ${esc(c.lot_id)} / ${esc(c.route_id)} · ${esc(c.reason)}</div>`).join("")}`;
+  $("#allocation-before").onclick = () => {pause(); seek(beforeCursor, true);};
+  $("#allocation-after").onclick = () => {pause(); seek(afterCursor, true);};
 }
 function graphLayout() {
   const positions = { INPUT: { x: 20, y: 157, w: 52, h: 42 } },
@@ -312,12 +335,12 @@ function renderGraph() {
   }
   for (const m of S.model.machines) {
     const p = positions[m.id],
-      state = machines[m.id],
+      state = machines[m.id]?.state === "idle" ? null : machines[m.id],
       waiting = Object.values(lots).filter(
         (l) => l.location === m.id && l.state === "waiting",
       ).length;
     const selected = S.selected?.id === m.id;
-    svg += `<g class="machine-node ${state?.state || ""} ${selected ? "selected" : ""}" data-node="${esc(m.id)}" tabindex="0" role="button" aria-label="${esc(m.name)} 속성"><rect class="node-bg" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="7"/><rect x="${p.x + 10}" y="${p.y + 11}" width="20" height="20" rx="5" fill="${state?.state === "busy" ? "#d7ebda" : "#eff3ea"}"/><path d="M${p.x + 15} ${p.y + 25}v-8h4v4h5v4z" fill="none" stroke="#719069" stroke-width="1.2"/><text x="${p.x + 37}" y="${p.y + 21}" class="node-name">${esc(m.name.length > 10 ? m.name.slice(0, 9) + "…" : m.name)}</text><text x="${p.x + 37}" y="${p.y + 33}" class="node-meta">${esc(m.id)} · ${m.time}m</text><line x1="${p.x + 10}" y1="${p.y + 41}" x2="${p.x + p.w - 10}" y2="${p.y + 41}" stroke="#edf2e8"/><circle cx="${p.x + 13}" cy="${p.y + 51}" r="2.4" fill="${state?.state === "busy" ? "#51a277" : state ? "#d5a45a" : "#b6c5b0"}"/><text x="${p.x + 21}" y="${p.y + 54}" class="node-status">${state ? `${esc(state.lot)} ${state.state === "busy" ? "처리" : "이동"}` : "IDLE"}</text><text x="${p.x + p.w - 10}" y="${p.y + 54}" text-anchor="end" class="node-meta">대기 ${waiting}</text></g>`;
+    svg += `<g class="machine-node ${state?.state || ""} ${selected ? "selected" : ""}" data-node="${esc(m.id)}" tabindex="0" role="button" aria-label="${esc(m.name)} 속성"><rect class="node-bg" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="7"/><rect x="${p.x + 10}" y="${p.y + 11}" width="20" height="20" rx="5" fill="${state?.state === "processing" ? "#d7ebda" : "#eff3ea"}"/><path d="M${p.x + 15} ${p.y + 25}v-8h4v4h5v4z" fill="none" stroke="#719069" stroke-width="1.2"/><text x="${p.x + 37}" y="${p.y + 21}" class="node-name">${esc(m.name.length > 10 ? m.name.slice(0, 9) + "…" : m.name)}</text><text x="${p.x + 37}" y="${p.y + 33}" class="node-meta">${esc(m.id)} · ${m.time}m</text><line x1="${p.x + 10}" y1="${p.y + 41}" x2="${p.x + p.w - 10}" y2="${p.y + 41}" stroke="#edf2e8"/><circle cx="${p.x + 13}" cy="${p.y + 51}" r="2.4" fill="${state?.state === "processing" ? "#51a277" : state ? "#d5a45a" : "#b6c5b0"}"/><text x="${p.x + 21}" y="${p.y + 54}" class="node-status">${state ? `${esc(state.lot)} ${state.state === "processing" ? "처리" : "예약"}` : "IDLE"}</text><text x="${p.x + p.w - 10}" y="${p.y + 54}" text-anchor="end" class="node-meta">대기 ${waiting}</text></g>`;
   }
   svg += "</svg>";
   $("#graph").innerHTML = svg;
@@ -373,6 +396,7 @@ function renderTrace() {
       '<div class="empty"><b>첫 시뮬레이션을 실행해 보세요.</b>로트가 움직일 때마다, 경로와 선택 이유가 여기에 기록됩니다.<br>상단의 실행 버튼 또는 Ctrl+Enter</div>';
     return;
   }
+  if (S.tab === "allocations") { renderAllocationComparison(); return; }
   if (S.tab === "utilization") {
     const time = stateAt().time,
       spans = {},
@@ -419,8 +443,13 @@ function renderTrace() {
       renderGraph();
     };
 }
-function seek(cursor) {
+function seek(cursor, preserveComparison = false) {
   S.cursor = Math.max(0, Math.min(S.result?.events.length || 0, cursor));
+  if (!preserveComparison) {
+    const event = S.result?.events[S.cursor - 1];
+    const allocation = S.result?.allocations?.find(a => a.id === event?.allocation_id);
+    S.comparison = allocation?.decision_index ?? S.result?.events.slice(0, S.cursor).findLast(e => ["decision", "blocked"].includes(e.kind))?.index;
+  }
   renderPlayback();
   renderMetrics();
   renderGraph();
@@ -690,11 +719,12 @@ function inspectEvent(index) {
   if (!e) return;
   pause();
   S.selected = { type: "event", id: index };
+  seek(index + 1);
   let html = `<span class="info-tag">${esc(kinds[e.kind])} · ${fmt(e.time)} min</span><h3 style="margin-top:13px">${esc(e.lot.id)} <span class="subtle">제품 ${esc(e.lot.product)}</span></h3><button id="track-lot" class="quiet">이 로트의 전체 경로 추적 ↗</button>`;
   if (e.kind === "decision") {
     html += `<div class="info-card selected"><b>선택 이유</b>${esc(e.reason)}<small>${e.decision_mode === "pull" && e.machine ? `${esc(e.machine)}가 준비된 로트를 선택` : "출발 로트가 다음 목적지 선택"}</small></div><h3>비교한 후보 ${e.candidates.length}개</h3>`;
     for (const c of e.candidates)
-      html += `<div class="info-card ${c.id === e.chosen ? "selected" : ""}"><b>${c.id === e.chosen ? "✓ 선택" : "후순위"} · ${esc(c.lot_id)}</b><span class="route-key">${esc(c.from)} → ${esc(c.to)}</span><br>우선순위 ${c.priority} · 목적지 대기 ${c.queue_length}<br>${c.same_line ? "동일 라인" : "다른 라인 또는 입출고"} · 준비 ${fmt(c.ready_since)}m<small>${c.id === e.chosen ? "반환된 후보 ID와 일치" : "유효 후보였으나 사용자 선택 함수가 선택하지 않음"}</small></div>`;
+      html += `<div class="info-card ${c.id === e.chosen ? "selected" : ""}"><b>${c.id === e.chosen ? "✓ 선택" : "미선택"} · ${esc(c.lot_id)}</b><span class="route-key">${esc(c.from)} → ${esc(c.to)}</span><br>우선순위 ${c.priority} · 목적지 대기 ${c.queue_length}<br>${c.same_line ? "동일 라인" : "다른 라인 또는 입출고"} · 준비 ${fmt(c.ready_since)}m<small>${c.id === e.chosen ? "반환된 후보 ID와 일치" : "유효 후보였으나 사용자 선택 함수가 선택하지 않음"}</small></div>`;
     for (const c of e.checks.filter((c) => !c.eligible))
       html += `<div class="info-card rejected"><b>제외 · ${esc(c.lot_id)} / ${esc(c.route_id)}</b>${esc(c.reason)}</div>`;
     html +=
@@ -704,7 +734,9 @@ function inspectEvent(index) {
     for (const c of e.checks || [])
       html += `<div class="info-card rejected">${esc(c.route_id)} · ${esc(c.reason)}</div>`;
   }
+  html += `<button id="compare-allocation">할당 전후 비교</button>`;
   openInspector("의사결정 / 이벤트", html);
+  $("#compare-allocation").onclick = () => { closeInspector(); selectTab("allocations"); };
   $("#track-lot").onclick = () => inspectLot(e.lot.id);
   renderGraph();
 }
