@@ -84,7 +84,7 @@ class Handler(BaseHTTPRequestHandler):
                 job = JOBS.get(path.rsplit('/', 1)[1])
                 result = {k: v for k, v in job.items() if k in ('status', 'payload')} if job else None
             return self.send(200 if result else 404, result or {'error': '실행을 찾을 수 없습니다.'})
-        assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+        assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/allocation-results.js': ('allocation-results.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if path.startswith('/vendor/codemirror/'):
             name = path.removeprefix('/vendor/codemirror/')
             if '/' not in name and name.endswith(('.js', '.css')) and (ROOT / 'web/vendor/codemirror' / name).is_file():

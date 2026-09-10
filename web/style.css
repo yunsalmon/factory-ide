@@ -1374,3 +1374,17 @@ dialog li {
 .state-changed { background: #fff0c2; }
 .machine-node.processing .node-bg { stroke: #51a277; }
 @media (max-width: 700px) { .allocation-pair { grid-template-columns: 1fr; } }
+.allocation-results { padding: 16px; }
+.result-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.result-controls label { display: flex; gap: 4px; align-items: center; }
+.result-controls select, .result-controls input { max-width: 190px; }
+.result-table-wrap, #machine-timeline { overflow: auto; }
+#result-table { white-space: nowrap; }
+#result-table td, #result-table th { padding: 6px 10px; }
+#machine-timeline text { font-size: 10px; fill: #344636; }
+#machine-timeline [role="button"] { cursor: pointer; }
+#machine-timeline [role="button"]:focus rect { stroke: #222; stroke-width: 2; }
+.span-reserved { fill: #d5a45a; }
+.span-queued { fill: #a4aaa4; }
+.span-moving { fill: #589bca; }
+.span-processing { fill: #51a277; }

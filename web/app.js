@@ -21,6 +21,8 @@ const S = {
   selected: null,
   lot: null,
   tab: "events",
+  resultsFinal: false,
+  resultFilters: {},
   zoom: 1,
   warnings: [],
   console: "",
@@ -397,6 +399,7 @@ function renderTrace() {
       '<div class="empty"><b>첫 시뮬레이션을 실행해 보세요.</b>로트가 움직일 때마다, 경로와 선택 이유가 여기에 기록됩니다.<br>상단의 실행 버튼 또는 Ctrl+Enter</div>';
     return;
   }
+  if (S.tab === "results") { renderAllocationResults(); return; }
   if (S.tab === "allocations") { renderAllocationComparison(); return; }
   if (S.tab === "utilization") {
     const time = stateAt().time,
@@ -1083,3 +1086,64 @@ window.factoryStudio = {
   }),
   pause,
 };
+
+function selectResult(row) {
+  pause();
+  S.lot = row.lot;
+  S.selected = row.route ? {type: "route", id: row.route} : {type: "machine", id: row.source.machine};
+  S.comparison = row.decision;
+  seek(row.after, true);
+  if (row.decision !== null) selectTab("allocations");
+  else toast(`${row.lot} · 미할당 · 선택 기록 없음 · 공정도 위치 표시`);
+}
+function renderAllocationResults() {
+  const projection = allocationResults(S.result, S.cursor, S.resultsFinal, S.resultFilters);
+  const {rows, time} = projection;
+  const model = S.result.model;
+  const statuses = ["Push 배정 후 대기", "Pull 예약 후 대기", "출고 배정 후 대기", "이동 중", "처리 중", "처리 완료", "출고 완료", "미할당", "막힘"];
+  const choices = {process: model.processes.map(p => p.id), line: model.machines.map(m => m.line),
+    machine: ["INPUT", ...model.machines.map(m => m.id), "OUTPUT"], lot: S.result.events.filter(e => e.kind === "arrival").map(e => e.lot.id), status: statuses};
+  const names = {process: "공정", line: "라인", machine: "머신", lot: "로트", status: "상태"};
+  const filterHTML = Object.entries(choices).map(([key,values]) => `<label>${names[key]} <select data-result-filter="${key}"><option value="">전체</option>${[...new Set(values)].map(v => `<option value="${esc(v)}" ${S.resultFilters[key] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`).join("");
+  $("#trace-content").innerHTML = `<div class="allocation-results"><div class="result-controls"><label>보기 <select id="results-view"><option value="replay" ${!S.resultsFinal ? "selected" : ""}>현재 재생 시점</option><option value="final" ${S.resultsFinal ? "selected" : ""}>실행 최종 결과</option></select></label>${filterHTML}<label>로트 검색 <input id="result-search" value="${esc(S.resultFilters.search || "")}" type="search"></label><button id="result-reset">필터 초기화</button><button id="result-csv">표시 결과 CSV</button></div><p id="result-context">${S.resultsFinal ? "실행 최종 결과 · 재생 커서와 독립" : `현재 재생 시점 · 커서 ${S.cursor}`} · ${time} min · ${rows.length}행 · 필터 ${Object.values(S.resultFilters).some(Boolean) ? "적용" : "없음"}. 시간 단위: min. 빈 값은 미발생/해당 없음입니다. 완료 상태는 각 할당 방문의 상태입니다.</p><div class="result-table-wrap"><table id="result-table"><thead><tr>${allocationColumns.map(([name]) => `<th>${name}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i) => `<tr data-result-row="${i}">${allocationColumns.map(([,get],j) => `<td>${j === 0 ? `<button data-result-select="${i}">${esc(r.id || "미할당 위치")}</button>` : esc(get(r) ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>${rows.length ? "" : "<p>표시할 결과가 없습니다.</p>"}<h3>머신별 실제 시간 타임라인</h3><p>예약(노랑) · Push 배정 대기(회색) · 이동(파랑) · 실제 처리(초록). 각 할당은 별도 레인으로 표시합니다. 열린 구간은 표시 시점까지만 그리며 끝에 *를 표시합니다. 0분 구간도 선택할 수 있습니다.</p><div id="machine-timeline"></div></div>`;
+  $("#results-view").onchange = e => {S.resultsFinal = e.target.value === "final"; renderTrace();};
+  $$('[data-result-filter]').forEach(el => el.onchange = () => {S.resultFilters[el.dataset.resultFilter] = el.value; renderTrace();});
+  $("#result-search").oninput = e => {
+    const pos = e.target.selectionStart;
+    S.resultFilters.search = e.target.value; renderTrace();
+    $("#result-search").focus(); $("#result-search").setSelectionRange(pos, pos);
+  };
+  $("#result-reset").onclick = () => {S.resultFilters = {}; renderTrace();};
+  $("#result-csv").onclick = () => download("factory_allocations.csv", allocationCSV(rows, {
+    "보기": S.resultsFinal ? "실행 최종 결과" : "현재 재생 시점", "표시 시각 (min)": time,
+    "재생 커서": S.resultsFinal ? S.result.events.length : S.cursor,
+    "필터": Object.values(S.resultFilters).some(Boolean) ? JSON.stringify(S.resultFilters) : "없음",
+  }), "text/csv;charset=utf-8");
+  $$('[data-result-select]').forEach(el => el.onclick = () => selectResult(rows[Number(el.dataset.resultSelect)]));
+  const axis = Math.max(time, 0.000001), width = 800, left = 180;
+  let y = 35, body = "";
+  for (const machine of model.machines) {
+    const lanes = rows.map((r,i) => ({r,i})).filter(({r}) => r.id && r.destination.machine === machine.id);
+    if (!lanes.length) continue;
+    body += `<text x="5" y="${y}">${esc(machine.process)} / ${esc(machine.line)} / ${esc(machine.id)}</text>`; y += 22;
+    for (const {r,i} of lanes) {
+      body += `<text x="5" y="${y+13}">${esc(r.id)} · ${esc(r.lot)}</text>`;
+      const spans = [[r.assigned, r.move, r.reservation ? "reserved" : "queued", r.reservation ? "예약" : "배정 대기"],
+        [r.move, r.arrived, "moving", "이동"], [r.start, r.finish, "processing", "실제 처리"]];
+      // Reservation continues during transport; separate vertical strips preserve overlaps.
+      if (r.reservation) spans[0][1] = r.start;
+      spans.forEach(([start,end,kind,label],strip) => {
+        if (start === null) return;
+        const endTime = end ?? time;
+        body += `<g data-result-span="${i}" tabindex="0" role="button" aria-label="${esc(r.id)} ${label} ${start} ~ ${endTime}${end === null ? ' 진행 중' : ''} min"><title>${esc(r.id)} · ${label}: ${start} ~ ${endTime} min${end === null ? ' (진행 중)' : ''}</title><rect class="span-${kind}" x="${left + start/axis*width}" y="${y+strip*8}" width="${Math.max(2,(endTime-start)/axis*width)}" height="7"/>${end === null ? `<text x="${left + endTime/axis*width + 3}" y="${y+strip*8+8}">*</text>` : ""}</g>`;
+      });
+      y += 32;
+    }
+  }
+  const ticks = Array.from({length: 6}, (_,i) => `<line x1="${left+i*width/5}" x2="${left+i*width/5}" y1="22" y2="${y}" stroke="#e5e9e5"/><text x="${left+i*width/5}" y="15">${Number((time*i/5).toFixed(4))} min</text>`).join("");
+  $("#machine-timeline").innerHTML = `<svg width="1050" height="${y+10}" role="img" aria-label="머신별 실제 시뮬레이션 시간 축">${ticks}${body}</svg>`;
+  $$('[data-result-span]').forEach(el => {
+    el.onclick = () => selectResult(rows[Number(el.dataset.resultSpan)]);
+    el.onkeydown = e => {if (["Enter", " "].includes(e.key)) {e.preventDefault(); el.onclick();}};
+  });
+}
