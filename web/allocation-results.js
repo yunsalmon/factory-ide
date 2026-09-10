@@ -7,7 +7,7 @@ function allocationResults(result, cursor, finalView = false, filters = {}) {
   const endpoint = id => ({machine: id || "", process: machines[id]?.process || "", line: machines[id]?.line || ""});
   const grouped = new Map(), latest = new Map();
   for (const e of events) {
-    latest.set(e.lot.id, e);
+    if (e.lot) latest.set(e.lot.id, e);
     if (e.allocation_id) {
       if (!grouped.has(e.allocation_id)) grouped.set(e.allocation_id, []);
       grouped.get(e.allocation_id).push(e);
@@ -33,7 +33,7 @@ function allocationResults(result, cursor, finalView = false, filters = {}) {
   for (const e of latest.values()) {
     const lot = e.lot;
     if (lot.state !== "waiting" || lot.target || lot.allocation_id) continue;
-    const history = events.filter(item => item.lot.id === lot.id);
+    const history = events.filter(item => item.lot?.id === lot.id);
     const boundary = history.findLastIndex(item => item.kind === "ready");
     const decision = history.slice(Math.max(0, boundary)).findLast(item => ["decision", "blocked"].includes(item.kind));
     rows.push({id: "", lot: lot.id, product: lot.product, source: endpoint(lot.location), destination: endpoint(null),
