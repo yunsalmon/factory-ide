@@ -102,6 +102,7 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({f'/{name}': (name, 'text/javascript') for name in ('inventory-projection.js', 'inventory-ui.js', 'scenario-comparison.js', 'scenario-ui.js')})
         assets.update({f'/{name}': (name, 'text/javascript') for name in ('order-projection.js', 'order-ui.js')})
         assets['/operations.js'] = ('operations.js', 'text/javascript')
+        assets.update({f'/{name}': (name, 'text/javascript') for name in ('order-projection.js', 'order-ui.js', 'data-core.js', 'data-ui.js', 'data-worker.js')})
         if path.startswith('/vendor/codemirror/'):
             name = path.removeprefix('/vendor/codemirror/')
             if '/' not in name and name.endswith(('.js', '.css')) and (ROOT / 'web/vendor/codemirror' / name).is_file():

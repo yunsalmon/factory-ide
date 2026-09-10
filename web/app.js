@@ -438,6 +438,7 @@ function renderTrace() {
     return;
   }
   if (S.tab === "scenarios") { renderScenarios(); return; }
+  if (S.tab === "data") { renderDataPanel(); return; }
   if (S.tab === "orders") { renderPlanner(); return; }
   if (S.tab === "operations") { renderOperations(); return; }
   if (!S.result) {
