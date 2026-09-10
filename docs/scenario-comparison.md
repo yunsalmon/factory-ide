@@ -31,3 +31,19 @@ Allocation decisions/assignments, buffer entry/wait, machine-state transitions a
 ## Validation
 
 `python -m unittest discover -s tests -v` covers stable hashes, identical zero differences, signed quantity/lot changes, independent congestion integration, compatibility rejection, missing values and artifact integrity. `python tests/browser_scenarios.py` covers ko/en/ja desktop/320px actual executions, export/import, unchanged restored metrics, linked traces, no execution requests during restoration and reload. Pass a static Nginx URL as an argument to exercise the same flow through the browser Python Worker.
+
+## Combined operator prototype validation
+
+`tests/browser_persona_integration.py` imports a canonical model containing orders,
+finite INPUT storage, offshift windows and shared operators through the actual
+browser data worker. It runs that model, checks WIP/order counts and every machine
+state KPI against the result's complete operation metrics, verifies buffer and
+order due metrics, then round-trips and restores scenario snapshots. It also
+checks transient observation calibration, absence of raw observation uploads or
+local-storage writes, and ko/en/ja mobile tab layout. Applied model source and
+explicitly saved scenarios retain their existing persistence behavior; raw import
+text and observed records remain in memory only.
+
+The static-browser regression additionally checks all scenario/data script assets
+and tabs while using the same browser Python execution path and current runtime
+initialization/cancellation contract.

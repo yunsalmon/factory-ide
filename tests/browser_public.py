@@ -19,6 +19,7 @@ with urlopen(base + '/demo.json') as response:
 for asset in ['inventory-projection.js', 'inventory-ui.js', 'allocation-results.js',
               'browser-runtime.js', 'browser-worker.js', 'locales.json',
               'order-projection.js', 'order-ui.js', 'operations.js',
+              'scenario-comparison.js', 'scenario-ui.js', 'data-core.js', 'data-ui.js', 'data-worker.js',
               'runtime/orders.py', 'runtime/disruptions.py', 'runtime/operation_metrics.py',
               'runtime/engine.py', 'runtime/model.py', 'runtime/messages.py']:
     with urlopen(base + '/' + asset) as response:
@@ -117,7 +118,7 @@ with sync_playwright() as playwright:
         for width in [1600, 390]:
             page.set_viewport_size({'width': width, 'height': 1000})
             for cursor in [nullable + 1, pending, len(integrated['events'])]:
-                for tab in ['events', 'wip', 'orders', 'operations', 'results', 'allocations', 'lots', 'utilization', 'console']:
+                for tab in ['events', 'wip', 'orders', 'operations', 'results', 'allocations', 'lots', 'utilization', 'console', 'scenarios', 'data']:
                     page.evaluate('([c,t])=>{seek(c);selectTab(t)}', [cursor, tab])
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.evaluate('(i)=>inspectEvent(i)', nullable)
