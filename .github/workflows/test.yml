@@ -14,11 +14,13 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m playwright install --with-deps chromium
+      - run: python scripts/fetch_browser_runtime.py
       - run: python -m unittest discover -s tests -v
       - run: python tests/browser_smoke.py
       - run: python tests/browser_inventory.py
       - run: python tests/browser_orders.py
       - run: python tests/browser_scenarios.py
+      - run: python tests/browser_experiments.py
       - run: python tests/browser_operations.py
       - run: python tests/browser_operation_families.py
       - uses: actions/upload-artifact@v4

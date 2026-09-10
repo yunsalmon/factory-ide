@@ -181,3 +181,5 @@ See [order schema, replay metrics and dispatch contract](docs/orders.md) for tim
 semantics, finite INPUT admission, localized validation and tests.
 
 Planner scenario comparison: run and save named snapshots, compare signed final-horizon KPIs, inspect paired trace evidence, and export/restore without rerunning. See [scenario contract and metric definitions](docs/scenario-comparison.md).
+
+Repeated browser experiments support explicit seed sets, bounded concurrency, cancellation, KPI uncertainty and portable artifacts. See [experiment contracts and local runtime setup](docs/experiments.md).
