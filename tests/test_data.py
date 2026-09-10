@@ -11,7 +11,7 @@ class DataTests(unittest.TestCase):
   cls.p=sync_playwright().start();cls.b=cls.p.chromium.launch();cls.page=cls.b.new_page();cls.page.add_script_tag(path=str(ROOT/'web/data-core.js'))
  @classmethod
  def tearDownClass(cls):cls.b.close();cls.p.stop()
- def call(self,request):return self.page.evaluate('r=>{try{return prepareDataImport(r)}catch(e){return {ok:false,code:e.code}}}',request)
+ def call(self,request):return self.page.evaluate('r=>{try{return prepareDataImport(r)}catch(e){return {ok:false,code:e.code,row:e.row,field:e.field}}}',request)
  def model(self):
   m=ordered_model();m['lines']=[{'id':m['machines'][0]['line'],'name':'Line, 日本'}];m['products']=[{'id':'A'},{'id':'B'}];m['buffers']=[{'id':'BUF','at':'INPUT','capacity':None,'policy':'fifo'}];m['orders'][1]['due_time']=None;m['orders'][1]['due_date']=None;m['machines'][0]['name']='';m['orders'][0]['customer']='';m['custom']={'preserved':[1,'한글']};return m
  def test_canonical_and_all_table_csv_roundtrip(self):
@@ -32,6 +32,18 @@ class DataTests(unittest.TestCase):
    r=self.call(dict(text=f'id,kind,time,lot\nx,arrival,{stamp},PRIVATE',format='csv',table='observations',baseModel=m,options={'origin':'2026-09-10T00:00:00Z','timezone':'Z','unit':'seconds'}));self.assertTrue(r['ok'],r);self.assertEqual(r['candidate']['events'][0]['time'],expected)
   for text in ['id\n'+'x\n'*20001,'id\n'+'x'*65537,','.join('h'+str(i) for i in range(129))]:
    self.assertEqual(self.call(dict(text=text,format='csv',table='observations',baseModel=m))['code'],'data_limit')
+ def test_numeric_observations_validate_document_origin(self):
+  m=ordered_model()
+  for origin in ['2026-02-30T00:00:00Z','not-rfc3339','2026-01-01T00:00:00+24:00','2026-01-01T00:00:00+00:60','1900-02-29T00:00:00Z','2026-01-01T24:00:00Z','2026-01-01T00:00:00','',None,0]:
+   doc=dict(schema_version=1,kind='observations',time_origin=origin,events=[dict(id='x',kind='arrival',time=0,lot='L')])
+   r=self.call(dict(text=json.dumps(doc),format='json',baseModel=m));self.assertFalse(r['ok'],origin);self.assertTrue(any(d['field']=='time_origin' and d['row']==1 for d in r['diagnostics']),r)
+  for origin in ['2000-02-29T23:59:59.999Z','2024-02-29T00:00:00+23:59','2026-12-31T23:59:59-23:59','0001-01-01T00:00:00Z']:
+   doc=dict(schema_version=1,kind='observations',time_origin=origin,events=[dict(id='x',kind='arrival',time=0,lot='L')])
+   r=self.call(dict(text=json.dumps(doc),format='json',baseModel=m));self.assertTrue(r['ok'],r);self.assertEqual(r['candidate']['time_origin'],origin);self.assertEqual(r['candidate']['events'][0]['time'],0)
+  r=self.call(dict(text='id,kind,time,lot\nx,arrival,0,L',format='csv',table='observations',baseModel=m,options={'origin':'2026-02-30T00:00:00Z'}));self.assertFalse(r['ok']);self.assertEqual(r['diagnostics'][0]['field'],'time_origin')
+ def test_parser_errors_preserve_physical_source_rows(self):
+  for text,row in [('id,name\nP1,x\nP2,x,extra',3),('id,name\nP1,"line\ncontinued"\nP2,x,extra',4),('id,name\nP1,"line\ncontinued"x',3),('id,name\nP1,"line\nunfinished',3),('id,name\rP1,"line\rcontinued"\rP2,x,extra',4)]:
+   r=self.call(dict(text=text,format='csv',table='processes',baseModel=ordered_model()));self.assertEqual(r['code'],'data_bad_csv');self.assertEqual(r['row'],row);self.assertEqual(r['field'],'row')
  def test_json_units_and_physical_row_identity(self):
   m=self.model();r=self.call(dict(text=json.dumps(dict(schema_version=1,kind='model',time_unit='seconds',model=m)),format='json',baseModel=m));self.assertTrue(r['ok'],r);self.assertEqual(r['candidate']['duration'],.5);self.assertAlmostEqual(r['candidate']['machines'][0]['time'],2/60)
   m['machines']=[None,dict(m['machines'][0],process='MISSING')]
