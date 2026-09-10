@@ -435,6 +435,7 @@ function renderTrace() {
     container.innerHTML = `<pre class="console ${S.parseError ? "error" : ""}">${esc([S.parseError, ...S.warnings.map((w,i) => localized(w, S.warningMessages?.[i])), S.console, displayMessage(S.runtimeError)].filter(Boolean).join("\n\n") || tr("ui_67"))}</pre>`;
     return;
   }
+  if (S.tab === "experiments") { renderExperiments(); return; }
   if (S.tab === "scenarios") { renderScenarios(); return; }
   if (S.tab === "orders") { renderPlanner(); return; }
   if (S.tab === "operations") { renderOperations(); return; }

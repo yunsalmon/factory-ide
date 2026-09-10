@@ -41,7 +41,7 @@ sys.path.insert(0, "/factory_runtime")
 import simpy
 from engine import Factory
 from messages import descriptor
-from model import ModelError, parse
+from model import ModelError, parse, synchronize
 
 _allowed_imports = {
     "bisect", "collections", "copy", "dataclasses", "decimal", "enum", "fractions",
@@ -86,11 +86,19 @@ def _execute(source):
         raise ModelError(message("message_37"))
     return Factory(model, namespace.get("choose_candidate"), namespace.get("processing_time"), namespace.get("process_lot")).run()
 
-def _handle(operation, source):
+def _handle(operation, source, seed=None):
     log = _LimitedLog()
     try:
         if len(source.encode("utf-8")) > 1_000_000:
             raise ModelError("Source exceeds the 1 MB browser limit")
+        if operation == "run_seed":
+            if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**32:
+                raise ModelError("Invalid experiment seed")
+            model, _, _ = parse(source)
+            model["seed"] = seed
+            source = synchronize(source, model)
+            import random
+            random.seed(seed)
         if operation == "parse":
             model, _, warnings = parse(source)
             payload = {"model": model, "warnings": warnings, "warning_messages": [descriptor(w) for w in warnings]}
@@ -99,6 +107,11 @@ def _handle(operation, source):
                 result = _execute(source)
             result["console"] = log.getvalue()
             payload = {"ok": True, "result": result}
+            if operation == "run_seed":
+                payload["source"] = source
+                payload["input_model"] = model
+                if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > 5_000_000:
+                    raise ModelError("Experiment trace exceeds 5 MB limit")
         return json.dumps({"ok": True, "payload": payload}, ensure_ascii=False, allow_nan=False)
     except BaseException as error:
         return json.dumps({
@@ -111,6 +124,7 @@ def _handle(operation, source):
         }, ensure_ascii=False, allow_nan=False)
 `);
   runtime = {
+    factory_sha256: [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify([engine, model, messages, orders, disruptions, metrics, locales]))))].map(value => value.toString(16).padStart(2, "0")).join(""),
     pyodide: PYODIDE_VERSION,
     python: pyodide.runPython("platform.python_version()"),
     simpy: pyodide.runPython("simpy.__version__"),
@@ -133,12 +147,13 @@ async function handle(message) {
       send({type: "ready", id: message.id, runtime: details});
       return;
     }
-    if (!["parse", "run"].includes(message.type) || typeof message.source !== "string") {
+    if (!["parse", "run", "run_seed"].includes(message.type) || typeof message.source !== "string") {
       throw new TypeError("Invalid browser worker request");
     }
     pyodide.globals.set("__factory_operation", message.type);
     pyodide.globals.set("__factory_source", message.source);
-    const response = JSON.parse(await pyodide.runPythonAsync("_handle(__factory_operation, __factory_source)"));
+    pyodide.globals.set("__factory_seed", message.seed ?? null);
+    const response = JSON.parse(await pyodide.runPythonAsync("_handle(__factory_operation, __factory_source, __factory_seed)"));
     if (!response.ok) {
       send({type: "error", id: message.id, ...response});
       return;
