@@ -77,3 +77,33 @@ docker compose -f deploy/compose.yml restart factory-demo
 ```
 
 For an update, retain the previous full SHA and image ID, build the new clean commit, pass isolated tests, then set `FACTORY_REVISION` to the new SHA and `docker compose -f deploy/compose.yml up -d --no-build`. Check health/version and external browser acceptance again. For rollback, set `FACTORY_REVISION` to the retained previous SHA and run the same command; verify the restored version externally. Never prune the previous image until the new release is accepted. No persistent application data or schema migration exists. To remove publication, the tunnel owner removes only this ingress/DNS entry and the dedicated network attachment, then stops the demo Compose service. Existing blog routing stays intact.
+
+### Runtime transfer and cache contract
+
+The static build writes deterministic `.gz` sidecars when they save at least 5%
+for files of at least 1 KiB. Nginx serves them with `Content-Encoding: gzip` and
+`Vary: Accept-Encoding`, preserving the uncompressed response for clients that do
+not accept gzip. WASM keeps `application/wasm`; already-compressed archives are
+only compressed further when this meaningfully reduces their size.
+
+Pyodide loads from `/vendor/pyodide/0.27.7/` (the pinned runtime version), with
+`Cache-Control: public, max-age=86400, must-revalidate`. It is not immutable.
+Same-path worker/controller scripts and Python runtime modules use `public,
+max-age=0, must-revalidate`: browsers can store them and send validators, but must
+check with the server before reuse. Documents retain `no-cache`. Runtime upgrades
+must update the worker's pinned version and fetch manifest together. Rebuild and
+replace the complete image; do not overwrite individual live assets.
+
+After building and starting the isolated container as above, run:
+
+```sh
+python tests/static_delivery.py http://127.0.0.1:13084
+python tests/browser_public.py http://127.0.0.1:13084
+```
+
+The delivery check validates raw/decompressed artifact hashes, compression sizes,
+ETag revalidation, versioned and same-path cache policies, WASM MIME, document and
+worker CSP, and the `/api/` rejection boundary. It does not prove public tunnel
+throughput; repeat the cold browser acceptance through the published hostname
+after the authorized image replacement. Proxy/CDN compression negotiation or
+cache rules can change observed delivery independently of the container.

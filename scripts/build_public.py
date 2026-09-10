@@ -1,6 +1,7 @@
 """Build trusted, precomputed assets. Never run against visitor-supplied source."""
 import argparse
 import hashlib
+import gzip
 import json
 from pathlib import Path
 import platform
@@ -20,7 +21,7 @@ def build(output, revision, runtime_dir=None):
     shutil.copytree(ROOT / 'web', output, dirs_exist_ok=True)
     runtime_dir = runtime_dir or ROOT / '.cache' / 'browser-runtime'
     runtime_manifest = fetch(runtime_dir)
-    shutil.copytree(runtime_dir, output / 'vendor' / 'pyodide', dirs_exist_ok=True)
+    shutil.copytree(runtime_dir, output / 'vendor' / 'pyodide' / runtime_manifest['pyodide'], dirs_exist_ok=True)
     python_runtime = output / 'runtime'
     python_runtime.mkdir(exist_ok=True)
     for name in ('engine.py', 'model.py', 'messages.py', 'orders.py', 'disruptions.py', 'operation_metrics.py'):
@@ -52,6 +53,19 @@ def build(output, revision, runtime_dir=None):
     with (output / 'style.css').open('a') as f:
         f.write('\nhtml[data-mode="public"] :is(#add-process,#add-machine,#add-route,#settings-button){display:none!important}\nhtml:not([data-mode="public"]) #reset-button{display:none!important}.public-notice{padding:12px 18px;border:1px solid #618572;border-radius:8px;margin-bottom:16px}.public-notice p{margin:6px 0}.public-notice code{overflow-wrap:anywhere}\n')
     shutil.copy(ROOT / 'deploy/install.html', output)
+    # Deterministic precompression avoids repeated CPU work in the static server.
+    # Leave archives alone unless compression actually reduces transfer size.
+    for asset in output.rglob('*'):
+        if not asset.is_file() or asset.suffix == '.gz':
+            continue
+        compressed_path = asset.with_name(asset.name + '.gz')
+        compressed_path.unlink(missing_ok=True)
+        raw = asset.read_bytes()
+        if len(raw) < 1024:
+            continue
+        compressed = gzip.compress(raw, compresslevel=9, mtime=0)
+        if len(compressed) < len(raw) * .95:
+            compressed_path.write_bytes(compressed)
     return version
 
 if __name__ == '__main__':

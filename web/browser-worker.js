@@ -4,6 +4,7 @@ const internalPostMessage = self.postMessage.bind(self);
 const internalFetch = self.fetch.bind(self);
 const internalImportScripts = self.importScripts.bind(self);
 const PYODIDE_VERSION = "0.27.7";
+const PYODIDE_BASE = `/vendor/pyodide/${PYODIDE_VERSION}/`;
 let pyodide;
 let runtime;
 
@@ -13,10 +14,10 @@ function send(message) {
 
 async function initialize() {
   if (runtime) return runtime;
-  internalImportScripts("/vendor/pyodide/pyodide.js");
-  pyodide = await loadPyodide({indexURL: new URL("/vendor/pyodide/", self.location.origin).href});
+  internalImportScripts(PYODIDE_BASE + "pyodide.js");
+  pyodide = await loadPyodide({indexURL: new URL(PYODIDE_BASE, self.location.origin).href});
   const [wheel, engine, model, messages, locales, orders, disruptions, metrics] = await Promise.all([
-    internalFetch("/vendor/pyodide/simpy-4.1.1-py3-none-any.whl").then((response) => response.arrayBuffer()),
+    internalFetch(PYODIDE_BASE + "simpy-4.1.1-py3-none-any.whl").then((response) => response.arrayBuffer()),
     internalFetch("/runtime/engine.py").then((response) => response.text()),
     internalFetch("/runtime/model.py").then((response) => response.text()),
     internalFetch("/runtime/messages.py").then((response) => response.text()),
