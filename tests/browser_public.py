@@ -19,12 +19,18 @@ with urlopen(base + '/demo.json') as response:
 for asset in ['inventory-projection.js', 'inventory-ui.js', 'allocation-results.js',
               'browser-runtime.js', 'browser-worker.js', 'locales.json',
               'order-projection.js', 'order-ui.js', 'operations.js',
-              'scenario-comparison.js', 'scenario-ui.js', 'data-core.js', 'data-ui.js', 'data-worker.js',
+              'scenario-comparison.js', 'scenario-ui.js', 'experiment-core.js', 'experiment-ui.js', 'data-core.js', 'data-ui.js', 'data-worker.js',
               'runtime/orders.py', 'runtime/disruptions.py', 'runtime/operation_metrics.py',
               'runtime/engine.py', 'runtime/model.py', 'runtime/messages.py']:
     with urlopen(base + '/' + asset) as response:
         assert response.status == 200 and response.read(), asset
 
+module_texts=[]
+for path in ['runtime/engine.py','runtime/model.py','runtime/messages.py','runtime/orders.py',
+             'runtime/disruptions.py','runtime/operation_metrics.py','locales.json']:
+    with urlopen(base + '/' + path) as response:
+        module_texts.append(response.read().decode())
+factory_hash=hashlib.sha256(json.dumps(module_texts,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
 result = bundle['result']
 version = bundle['version']
 assert hashlib.sha256(bundle['source'].encode()).hexdigest() == version['source_sha256']
@@ -84,7 +90,7 @@ with sync_playwright() as playwright:
         assert custom['model']['machines'][0]['time'] == 13
         assert custom['events'] != result['events']
         assert custom['execution']['kind'] == 'browser'
-        assert custom['execution']['runtime'] == {'pyodide': '0.27.7', 'python': '3.12.7', 'simpy': '4.1.1'}
+        assert custom['execution']['runtime'] == {'pyodide': '0.27.7', 'python': '3.12.7', 'simpy': '4.1.1', 'factory_sha256': factory_hash}
         assert custom['execution']['source_sha256'] == hashlib.sha256(changed.encode()).hexdigest()
         assert not any('/api/' in url for url in requests), requests
 
@@ -118,7 +124,7 @@ with sync_playwright() as playwright:
         for width in [1600, 390]:
             page.set_viewport_size({'width': width, 'height': 1000})
             for cursor in [nullable + 1, pending, len(integrated['events'])]:
-                for tab in ['events', 'wip', 'orders', 'operations', 'results', 'allocations', 'lots', 'utilization', 'console', 'scenarios', 'data']:
+                for tab in ['events', 'wip', 'orders', 'operations', 'results', 'allocations', 'lots', 'utilization', 'console', 'scenarios', 'data', 'experiments']:
                     page.evaluate('([c,t])=>{seek(c);selectTab(t)}', [cursor, tab])
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.evaluate('(i)=>inspectEvent(i)', nullable)

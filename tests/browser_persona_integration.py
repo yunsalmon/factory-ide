@@ -44,7 +44,32 @@ with sync_playwright() as p:
   assert page.evaluate('simulatedCalibration(S.result,S.result.events.length,true,0,S.result.summary.horizon).throughput.lots')==4
   assert 'PRIVATE_INTEGRATION_RAW' not in page.evaluate('JSON.stringify(localStorage)')
   assert not any('PRIVATE_INTEGRATION_RAW' in body for body in requests)
-  for tab in ['data','scenarios','orders','wip','operations','results']:
+  # The restored imported scenario is the immutable experiment input. Results
+  # use the same complete KPI projection and leave transient observations alone.
+  page.locator('[data-tab="experiments"]').click()
+  page.locator('#ex-name').fill('Imported scenario')
+  page.locator('#ex-seeds').fill('5,6')
+  page.locator('#ex-concurrency').select_option('2')
+  experiment_requests=[]
+  page.on('request',lambda request:experiment_requests.append(request.url))
+  page.locator('#ex-run').click()
+  page.wait_for_function('()=>EXPERIMENTS.items.length===1&&!EXPERIMENTS.runner.active',timeout=120000)
+  exp=page.evaluate('EXPERIMENTS.items[0]')
+  assert all(run['status']=='success' for run in exp['runs']),exp
+  assert exp['definition']['source']==page.evaluate('S.source')
+  assert exp['definition']['model']['orders']==model['orders']
+  assert exp['definition']['model']['resources']==model['resources']
+  for row in exp['runs']:
+   assert set(row['metrics'])==set(metrics)
+   assert row['metrics']['completed_lots']==4
+   assert row['metrics']['buffer_full'] is not None
+   assert all(row['metrics'][key] is not None for key in metrics if key.startswith('state:'))
+  assert page.evaluate('scenarioCanonical(scenarioMetrics(EXPERIMENTS.items[0].representative.result))===scenarioCanonical(EXPERIMENTS.items[0].runs[0].metrics)')
+  assert page.evaluate('DATA.observations.events[0].id')=='PRIVATE_INTEGRATION_RAW'
+  assert not any('/api/run' in url for url in experiment_requests),'experiment executed on server'
+  assert not any('PRIVATE_INTEGRATION_RAW' in body for body in requests)
+  assert 'PRIVATE_INTEGRATION_RAW' not in page.evaluate('JSON.stringify(localStorage)')
+  for tab in ['data','scenarios','orders','wip','operations','results','experiments']:
    page.locator(f'[data-tab="{tab}"]').click()
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),tab
    assert 'Translation unavailable' not in page.locator('#trace-content').inner_text()

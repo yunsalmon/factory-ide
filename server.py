@@ -16,6 +16,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 from model import ModelError, parse, synchronize
+from scripts.fetch_browser_runtime import PYODIDE_VERSION
 
 ROOT = Path(__file__).resolve().parent
 TOKEN = secrets.token_urlsafe(32)
@@ -107,8 +108,8 @@ class Handler(BaseHTTPRequestHandler):
         assets.update({f'/{name}': (name, 'text/javascript') for name in ('browser-runtime.js','browser-worker.js','experiment-core.js','experiment-ui.js')})
         if path.startswith('/runtime/') and path.removeprefix('/runtime/') in ('engine.py','model.py','messages.py','orders.py','disruptions.py','operation_metrics.py'):
             return self.send(200, (ROOT / path.removeprefix('/runtime/')).read_bytes(), 'text/plain; charset=utf-8')
-        if path.startswith('/vendor/pyodide/'):
-            name = path.removeprefix('/vendor/pyodide/')
+        if path.startswith(f'/vendor/pyodide/{PYODIDE_VERSION}/'):
+            name = path.removeprefix(f'/vendor/pyodide/{PYODIDE_VERSION}/')
             target = ROOT / '.cache/browser-runtime' / name
             if '/' not in name and name in ('pyodide.js','pyodide.asm.js','pyodide.asm.wasm','python_stdlib.zip','pyodide-lock.json','simpy-4.1.1-py3-none-any.whl') and target.is_file():
                 return self.send(200, target.read_bytes(), 'application/wasm' if name.endswith('.wasm') else 'text/javascript' if name.endswith('.js') else 'application/octet-stream')

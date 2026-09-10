@@ -31,3 +31,21 @@ Experiment comparison reports candidate minus baseline means and each measured n
 - `BrowserPythonRuntime.runSeed`: internal seeded Worker operation, separate from existing normal run.
 
 Tests include independent percentile/Student-t fixtures, deterministic out-of-order scheduling and failures, cancellation/recovery, integrity/seed bounds, actual Python random reproducibility, locale export/import/replay, main-thread heartbeat and mobile overflow.
+
+## Integrated operator workflow
+
+The local server serves the pinned `/vendor/pyodide/0.27.7/` runtime path used by
+the static worker. Fetch its checksum-verified cache with
+`python scripts/fetch_browser_runtime.py` before local experiment execution.
+Experiments retain the current 180-second initialization allowance, 8-second
+per-request execution limit, cancellation and initialization error handling.
+Static assets retain versioned bounded caching, gzip delivery and worker-only CSP.
+
+`tests/browser_persona_integration.py` imports a canonical order/buffer/resource
+model, runs and restores its scenario, then runs two seeds in browser workers.
+It checks every current operation-state KPI and buffer/due metrics, confirms no
+experiment `/api/run` submission, and verifies raw observations remain transient.
+Applied source is still validated by the local app's existing parse endpoint;
+raw observations are neither included in that source nor uploaded or persisted.
+The experiment browser suite additionally checks cancellation, failure exclusion,
+portable artifacts and mobile ko/en/ja against local or static builds.
