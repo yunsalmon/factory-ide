@@ -42,6 +42,7 @@ let parseTimer,
   settingEditor = false,
   errorLine = null;
 const kinds = {
+  get machine_state() { return tr("order_machine_state"); },
   get order_release() { return tr("order_actual_release"); },
   get arrival() { return tr("ui_1"); },
   get ready() { return tr("ui_2"); },
@@ -241,7 +242,7 @@ function stateAt(cursor = S.cursor) {
   const lots = {}, machines = {};
   for (const m of S.result?.model.machines || []) machines[m.id] = {state: "idle", lot: null};
   for (const e of S.result?.events.slice(0, cursor) || []) {
-    Object.assign(lots, copy(e.state_changes?.lots || {[e.lot.id]: e.lot}));
+    Object.assign(lots, copy(e.state_changes?.lots || (e.lot ? {[e.lot.id]: e.lot} : {})));
     Object.assign(machines, copy(e.state_changes?.machines || {}));
   }
   const queues = {};
@@ -254,7 +255,7 @@ function stateAt(cursor = S.cursor) {
 function renderAllocationComparison() {
   const records = S.result.events.filter(e => ["decision", "blocked"].includes(e.kind));
   const current = records.find(e => e.index === S.comparison);
-  const select = `<label>${tr("ui_23")} <select id="allocation-select" aria-label="${tr("ui_24")}"><option value="">${tr("ui_25")}</option>${records.map(e => `<option value="${e.index}" ${e === current ? "selected" : ""}>#${e.index} · ${fmt(e.time)}m · ${esc(e.allocation_id || (e.kind === "blocked" ? tr("ui_10") : e.outcome === "route_preference" ? tr("ui_26") : tr("ui_27")))} · ${esc(e.lot.id)}</option>`).join("")}</select></label>`;
+  const select = `<label>${tr("ui_23")} <select id="allocation-select" aria-label="${tr("ui_24")}"><option value="">${tr("ui_25")}</option>${records.map(e => `<option value="${e.index}" ${e === current ? "selected" : ""}>#${e.index} · ${fmt(e.time)}m · ${esc(e.allocation_id || (e.kind === "blocked" ? tr("ui_10") : e.outcome === "route_preference" ? tr("ui_26") : tr("ui_27")))} · ${esc(e.lot?.id || "—")}</option>`).join("")}</select></label>`;
   const container = $("#trace-content");
   container.innerHTML = `<div class="allocation-comparison">${select}<div id="allocation-detail"></div></div>`;
   $("#allocation-select").onchange = e => {
@@ -317,7 +318,7 @@ function renderGraph() {
   const routeHistory = new Set(
     S.lot
       ? (S.result?.events.slice(0, S.cursor) || [])
-          .filter((e) => e.lot.id === S.lot && e.kind === "move")
+          .filter((e) => e.lot?.id === S.lot && e.kind === "move")
           .map((e) => e.route)
       : [],
   );
@@ -447,14 +448,14 @@ function renderTrace() {
     return;
   }
   const filtered = events
-    .filter((e) => !S.lot || e.lot.id === S.lot)
+    .filter((e) => !S.lot || e.lot?.id === S.lot)
     .slice(-150)
     .reverse();
   container.innerHTML =
     (S.lot
       ? `<div class="lot-filter">${esc(S.lot)} ${tr("ui_75")}<button id="clear-lot">${tr("ui_76")}</button></div>`
       : "") +
-    `<table><thead><tr><th>${tr("event_time")}</th><th>${tr("event_lot")}</th><th>${tr("event_kind")}</th><th>${tr("event_location")}</th><th>${tr("event_detail")}</th></tr></thead><tbody>${filtered.map((e) => `<tr class="clickable ${e.index === S.cursor - 1 ? "current" : ""}" data-event="${e.index}"><td class="mono">${fmt(e.time)}</td><td class="mono">${esc(e.lot.id)}</td><td><span class="kind ${e.kind}">${kinds[e.kind] || esc(e.kind)}</span></td><td>${esc(e.machine || e.lot.location)}</td><td>${esc(e.kind === "decision" ? localized(e.reason, e.reason_message) : e.kind === "move" ? `${e.lot.location} → ${e.lot.target}` : e.kind === "start" ? (e.duration === null ? tr("ui_77") : `${tr("ui_78")} ${fmt(e.duration)} min`) : localized(e.reason, e.reason_message) || e.route || "—")}</td></tr>`).join("")}</tbody></table>`;
+    `<table><thead><tr><th>${tr("event_time")}</th><th>${tr("event_lot")}</th><th>${tr("event_kind")}</th><th>${tr("event_location")}</th><th>${tr("event_detail")}</th></tr></thead><tbody>${filtered.map((e) => `<tr class="clickable ${e.index === S.cursor - 1 ? "current" : ""}" data-event="${e.index}"><td class="mono">${fmt(e.time)}</td><td class="mono">${esc(e.lot?.id || "—")}</td><td><span class="kind ${e.kind}">${kinds[e.kind] || esc(e.kind)}</span></td><td>${esc(e.machine || e.lot?.location || "—")}</td><td>${esc(e.kind === "decision" ? localized(e.reason, e.reason_message) : e.kind === "move" ? `${e.lot.location} → ${e.lot.target}` : e.kind === "start" ? (e.duration === null ? tr("ui_77") : `${tr("ui_78")} ${fmt(e.duration)} min`) : localized(e.reason, e.reason_message) || e.route || "—")}</td></tr>`).join("")}</tbody></table>`;
   $$("[data-event]").forEach((r) => (r.onclick = () => inspectEvent(Number(r.dataset.event))));
   if ($("#clear-lot"))
     $("#clear-lot").onclick = () => {
@@ -746,7 +747,14 @@ function inspectEvent(index) {
   pause();
   S.selected = { type: "event", id: index };
   seek(index + 1);
-  let html = `<span class="info-tag">${esc(kinds[e.kind])} · ${fmt(e.time)} min</span><h3 style="margin-top:13px">${esc(e.lot.id)} <span class="subtle">${tr("ui_72")} ${esc(e.lot.product)}</span></h3><button id="track-lot" class="quiet">${tr("ui_121")}</button>`;
+  if (!e.lot) {
+    const transition=e.transition;
+    const label=state=>translations[locale]?.["order_"+state] ? tr("order_"+state) : state;
+    openInspector(tr("order_machine_state"), `<h3>${esc(e.machine)}</h3><p>${fmt(e.time)} min</p><p>${esc(label(transition?.previous.state))} → ${esc(label(transition?.current.state))}</p><p>${esc(transition?.current.cause||"")}</p>`);
+    renderGraph();
+    return;
+  }
+  let html = `<span class="info-tag">${esc(kinds[e.kind])} · ${fmt(e.time)} min</span><h3 style="margin-top:13px">${esc(e.lot?.id || "—")} <span class="subtle">${tr("ui_72")} ${esc(e.lot.product)}</span></h3><button id="track-lot" class="quiet">${tr("ui_121")}</button>`;
   if (e.kind === "decision") {
     html += `<div class="info-card selected"><b>${tr("ui_122")}</b>${esc(localized(e.reason, e.reason_message))}<small>${e.decision_mode === "pull" && e.machine ? `${esc(e.machine)}${tr("ui_123")}` : tr("ui_124")}</small></div><h3>${tr("ui_125")} ${e.candidates.length}${tr("ui_126")}</h3>`;
     for (const c of e.candidates)
@@ -769,7 +777,7 @@ function inspectEvent(index) {
 function inspectLot(id, refresh = true) {
   S.lot = id;
   S.selected = { type: "lot", id };
-  const events = (S.result?.events.slice(0, S.cursor) || []).filter((e) => e.lot.id === id);
+  const events = (S.result?.events.slice(0, S.cursor) || []).filter((e) => e.lot?.id === id);
   openInspector(
     tr("ui_141"),
     `<h3>${esc(id)}</h3><p>${tr("ui_142")}</p>${

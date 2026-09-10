@@ -416,7 +416,10 @@
     "order_machine_state": "설비 상태 변경",
     "order_buffer_enter": "버퍼 진입",
     "order_transport_arrive": "운송 도착",
-    "order_buffer_wait": "버퍼 여유 대기"
+    "order_buffer_wait": "버퍼 여유 대기",
+    "order_idle": "유휴",
+    "order_starved": "입력 대기",
+    "order_reserved": "예약됨"
   },
   "en": {
     "ui_1": "Arrival",
@@ -835,7 +838,10 @@
     "order_machine_state": "Machine state change",
     "order_buffer_enter": "Buffer entry",
     "order_transport_arrive": "Transport arrival",
-    "order_buffer_wait": "Waiting for buffer space"
+    "order_buffer_wait": "Waiting for buffer space",
+    "order_idle": "Idle",
+    "order_starved": "Waiting for input",
+    "order_reserved": "Reserved"
   },
   "ja": {
     "ui_1": "投入",
@@ -1254,6 +1260,9 @@
     "order_machine_state": "設備状態変更",
     "order_buffer_enter": "バッファ入場",
     "order_transport_arrive": "搬送到着",
-    "order_buffer_wait": "バッファ空き待ち"
+    "order_buffer_wait": "バッファ空き待ち",
+    "order_idle": "待機",
+    "order_starved": "入力待ち",
+    "order_reserved": "予約済み"
   }
 }

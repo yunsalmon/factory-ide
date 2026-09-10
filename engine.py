@@ -50,11 +50,16 @@ class Factory:
         if len(self.events) >= 50000:
             raise ModelError(message('message_26'))
         affected = lot
-        # Schema-v2 readers expect an existing lot envelope. Machine-only events
-        # use a context lot but never create a synthetic inventory item.
+        # Legacy generated supply retains its context envelope. Scheduled/empty
+        # order plans also record machine-only events before any lot exists.
         lot = lot or next(iter(self.lots.values()), None)
         if lot is None:
-            return
+            immediate_release = self.env.now == 0 and any(
+                planned['release_time'] == 0 for order in self.order_plan for planned in order['lots'])
+            # At time zero the first real lot snapshot already captures all state
+            # changes; retain its established event ordering without losing time.
+            if 'orders' not in self.model or immediate_release:
+                return
         machines = {}
         for mid, lid in self.busy.items():
             state = 'processing' if self.operations[mid]['state'] == 'processing' else 'reserved' if lid else 'idle'

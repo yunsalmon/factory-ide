@@ -75,8 +75,32 @@ class OrderProjectionTests(unittest.TestCase):
         for lot in p['rows'][0]['lots']:
             expected=[e['index'] for e in trace['events'] if e['affected_lot_id']==lot['id']]
             self.assertEqual(lot['history'],expected)
-        shared=self.project(trace,len(trace['events']),{'inventory':{'rows':[{'id':'L1','location':'WIP-IN','node':'INPUT','operation':None}]}})
+        shared=self.project(trace,len(trace['events']),{'inventory':{'location_contract':'factory-placement-v1','rows':[{'id':'L1','location':'WIP-IN','node':'INPUT','operation':None,'placement':{'kind':'buffer','id':'IN'},'state':'waiting'}]}})
         self.assertEqual(shared['rows'][0]['lots'][0]['location'],'WIP-IN')
+
+    def test_actual_issue11_adapter_preserves_explicit_buffer_and_external_release(self):
+        model=ordered_model();model['orders']=[dict(id='A',product='A',quantity=2,
+            lots=[dict(id='L1',quantity=1),dict(id='L2',quantity=1)])]
+        model['buffers']=[dict(id='IN',at='INPUT',capacity=1)]
+        model['machines'][0]['availability']=[dict(start=0,end=10,state='down')]
+        model['duration']=2
+        trace=Factory(model).run()
+        self.page.add_script_tag(path=str(ROOT/'tests/fixtures/inventory-projection-issue11.js'))
+        result=self.page.evaluate("r=>{const inventory=inventoryProjection(r,r.events.length);return {inventory,orders:orderProjection(r,r.events.length,{inventory})}}",trace)
+        # The real pre-placement adapter merges the two lots; the planner must not.
+        self.assertEqual([row['location'] for row in result['inventory']['rows']],['INPUT','INPUT'])
+        order=result['orders']['rows'][0]
+        self.assertEqual(order['locations'],{'IN':1,'INPUT (release)':1})
+        self.assertEqual([(lot['state'],lot['placement']['kind']) for lot in order['lots']], [('waiting','buffer'),('release_pending','release')])
+        self.assertEqual(result['orders']['totals']['released'],2)
+        self.assertEqual(order['locations'],self.project(trace,len(trace['events']))['rows'][0]['locations'])
+
+    def test_valid_offset_boundaries_match_python_and_javascript(self):
+        for offset in ['+00:00','-00:00','+00:59','-00:59','+23:59','-23:59']:
+            model=ordered_model();model['time_origin']='2026-09-10T00:00:00Z'
+            model['orders'][0].pop('due_time');model['orders'][0]['due_date']='2026-09-10T00:00:00'+offset
+            trace=Factory(model).run();fallback=copy.deepcopy(trace);del fallback['order_plan']
+            self.assertEqual(self.project(trace,0),self.project(fallback,0),offset)
 
     def test_plan_fallback_matches_server_dates_and_csv_filters(self):
         model=ordered_model();model['time_origin']='2026-09-10T09:00:00+09:00'
