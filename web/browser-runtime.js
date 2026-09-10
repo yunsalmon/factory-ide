@@ -22,7 +22,10 @@ class BrowserPythonRuntime {
   createWorker() {
     this.worker = new Worker(this.workerURL);
     this.worker.addEventListener("message", (event) => this.receive(event.data));
-    this.worker.addEventListener("error", (event) => this.failAll(new Error(event.message || "Browser worker failed")));
+    this.worker.addEventListener("error", (event) => {
+      this.terminate(new Error(event.message || "Browser worker failed"));
+      this.setState("stopped");
+    });
     this.ready = this.request("init", {}, this.initTimeout).then((payload) => {
       this.runtime = payload.runtime;
       this.setState("ready");
@@ -50,6 +53,7 @@ class BrowserPythonRuntime {
       const timer = setTimeout(() => {
         const error = Object.assign(new Error("Browser runtime wall-time limit exceeded"), {code: "browser_timeout"});
         this.terminate(error);
+        this.setState("stopped");
         reject(error);
       }, timeout);
       this.pending.set(id, {resolve, reject, timer});

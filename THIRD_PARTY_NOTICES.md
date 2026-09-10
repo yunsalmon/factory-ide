@@ -2,11 +2,19 @@
 
 ## SimPy 4.1.1
 
-Runtime dependency installed through `requirements.txt`. MIT license.
+Runtime dependency installed through `requirements.txt` and bundled as a checksum-pinned wheel in the public build. MIT license.
 
 - https://simpy.readthedocs.io/
 - https://gitlab.com/team-simpy/simpy
 - Installed package contains its copyright and license notice.
+
+## Pyodide 0.27.7
+
+The public build bundles Pyodide's JavaScript/WebAssembly CPython distribution under
+the Mozilla Public License 2.0. The verified payload includes `PYODIDE-LICENSE`.
+
+- https://pyodide.org/
+- https://github.com/pyodide/pyodide/tree/0.27.7
 
 ## CodeMirror 5.65.16
 

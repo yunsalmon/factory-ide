@@ -11,6 +11,7 @@ PYODIDE_VERSION = "0.27.7"
 SIMPY_VERSION = "4.1.1"
 PYODIDE_BASE = f"https://cdn.jsdelivr.net/pyodide/v{PYODIDE_VERSION}/full/"
 ARTIFACTS = {
+    "PYODIDE-LICENSE": ("https://raw.githubusercontent.com/pyodide/pyodide/0.27.7/LICENSE", "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"),
     "pyodide.js": (PYODIDE_BASE + "pyodide.js", "b4cb23a53aba19c221659b9fb40a2f18281d685691dc06647fb0afd0681baf98"),
     "pyodide.asm.js": (PYODIDE_BASE + "pyodide.asm.js", "6b4c90de5b7172873f04f21884d0e9d2274e305fe32116558fe3e4fbe3618d51"),
     "pyodide.asm.wasm": (PYODIDE_BASE + "pyodide.asm.wasm", "a50dd1843f805a0b7c45b61037ee0d7b26dfe85efe0e18ef95a34ad24e401f5f"),
