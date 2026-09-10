@@ -31,5 +31,5 @@ try:
     result['console'] = log.getvalue()
     response = dict(ok=True, result=result)
 except BaseException as e:
-    response = dict(ok=False, error=str(e) or type(e).__name__, traceback=traceback.format_exc(), console=log.getvalue())
+    response = dict(ok=False, error=str(e) or type(e).__name__, error_message=getattr(e, 'message', None), traceback=traceback.format_exc(), console=log.getvalue())
 sys.stdout.write(json.dumps(response, ensure_ascii=False, allow_nan=False))

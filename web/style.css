@@ -1388,3 +1388,11 @@ dialog li {
 .span-queued { fill: #a4aaa4; }
 .span-moving { fill: #589bca; }
 .span-processing { fill: #51a277; }
+/* Translation length must not hide actions or labels. */
+.topbar { flex-wrap: wrap; height: auto; min-height: 68px; gap: 10px; }
+.topbar nav, .trace-top, .tabs, .result-controls { flex-wrap: wrap; }
+.topbar nav { gap: 6px; }
+#language { max-width: 110px; }
+.view-switch button, .tabs button, .graph-footer span { white-space: normal; }
+.field > span { overflow-wrap: anywhere; }
+.allocation-state { min-width: 0; overflow-x: auto; }

@@ -50,7 +50,8 @@ def choose_candidate(candidates, context):
     chosen = min(candidates, key=lambda c: (
         c['priority'], c['queue_length'], c['ready_since'], c['id']
     ))
-    return chosen['id'], '경로 우선순위 → 목적지 대기 수 → 먼저 준비된 로트 순으로 선택'
+    from messages import message
+    return chosen['id'], message('message_25')
 
 
 def processing_time(machine, lot, context):

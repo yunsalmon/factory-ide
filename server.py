@@ -1,4 +1,5 @@
 """Local-only HTTP application. No build step or external frontend CDN."""
+from messages import message, descriptor
 import argparse
 import ipaddress
 import json
@@ -34,16 +35,18 @@ def stop_process(process):
 def run_job(job, source):
     try:
         stdout, stderr = job['process'].communicate(json.dumps({'source': source}), timeout=20)
-        payload = json.loads(stdout) if stdout else {'ok': False, 'error': '실행 프로세스가 종료되었습니다. 시간·메모리 한도 또는 사용자 코드 오류를 확인하세요.', 'traceback': stderr[-4000:]}
+        payload = json.loads(stdout) if stdout else {'ok': False, 'error': message('message_38'), 'traceback': stderr[-4000:]}
     except subprocess.TimeoutExpired:
         stop_process(job['process'])
         job['process'].communicate()
-        payload = {'ok': False, 'error': '실행 제한 시간(20초)을 초과했습니다.'}
+        payload = {'ok': False, 'error': message('message_39')}
     except Exception as e:
         payload = {'ok': False, 'error': str(e)}
     with LOCK:
         if job['status'] != 'cancelled':
             job.update(status='done', payload=payload)
+            if descriptor(payload.get('error')):
+                payload['error_message'] = descriptor(payload['error'])
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -51,6 +54,12 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def send(self, status, payload, content_type='application/json; charset=utf-8'):
+        if isinstance(payload, dict):
+            payload = dict(payload)
+            if descriptor(payload.get('error')):
+                payload['error_message'] = descriptor(payload['error'])
+            if 'warnings' in payload:
+                payload['warning_messages'] = [descriptor(w) for w in payload['warnings']]
         data = json.dumps(payload, ensure_ascii=False).encode() if isinstance(payload, (dict, list)) else payload
         self.send_response(status)
         self.send_header('Content-Type', content_type)
@@ -73,18 +82,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if not self.allowed():
-            return self.send(403, {'error': '로컬 동일 출처 요청만 허용됩니다.'})
+            return self.send(403, {'error': message('message_40')})
         path = urlparse(self.path).path
+        if path == '/locales.js':
+            catalogue = (ROOT / 'web/locales.json').read_text()
+            return self.send(200, ('const translations = ' + catalogue + ';').encode(), 'text/javascript; charset=utf-8')
         if path == '/api/bootstrap':
             return self.send(200, {'token': TOKEN, 'source': (ROOT / 'examples/demo.py').read_text(), 'version': '1.0.0'})
         if path.startswith('/api/jobs/'):
             if self.headers.get('X-Factory-Token') != TOKEN:
-                return self.send(403, {'error': '잘못된 실행 토큰'})
+                return self.send(403, {'error': message('message_41')})
             with LOCK:
                 job = JOBS.get(path.rsplit('/', 1)[1])
                 result = {k: v for k, v in job.items() if k in ('status', 'payload')} if job else None
-            return self.send(200 if result else 404, result or {'error': '실행을 찾을 수 없습니다.'})
-        assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/allocation-results.js': ('allocation-results.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+            return self.send(200 if result else 404, result or {'error': message('message_42')})
+        assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/i18n.js': ('i18n.js', 'text/javascript'), '/allocation-results.js': ('allocation-results.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         if path.startswith('/vendor/codemirror/'):
             name = path.removeprefix('/vendor/codemirror/')
             if '/' not in name and name.endswith(('.js', '.css')) and (ROOT / 'web/vendor/codemirror' / name).is_file():
@@ -97,11 +109,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if not self.allowed() or self.headers.get('X-Factory-Token') != TOKEN:
-            return self.send(403, {'error': '로컬 동일 출처 요청과 실행 토큰이 필요합니다.'})
+            return self.send(403, {'error': message('message_43')})
         try:
             length = int(self.headers.get('Content-Length', 0))
             if not 0 < length <= 1_000_000:
-                return self.send(413, {'error': '요청 크기 한도는 1 MB입니다.'})
+                return self.send(413, {'error': message('message_44')})
             body = json.loads(self.rfile.read(length))
             if self.path == '/api/parse':
                 model, _, warnings = parse(body['source'])
@@ -114,7 +126,7 @@ class Handler(BaseHTTPRequestHandler):
                 parse(body['source'])
                 with LOCK:
                     if any(j['status'] == 'running' for j in JOBS.values()):
-                        return self.send(409, {'error': '다른 실행이 진행 중입니다. 완료 또는 중지 후 실행하세요.'})
+                        return self.send(409, {'error': message('message_45')})
                     # Keep the latest results; avoid accumulating complete traces in memory.
                     if len(JOBS) >= 3:
                         JOBS.pop(next(iter(JOBS)))
@@ -135,25 +147,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {'status': 'cancelled'})
             return self.send(404, {'error': 'Not found'})
         except (ModelError, ValueError, KeyError, TypeError, AttributeError) as e:
-            return self.send(400, {'error': str(e)})
+            return self.send(400, {'error': str(e), 'error_message': getattr(e, 'message', None)})
         except Exception as e:
-            return self.send(500, {'error': f'서버 오류: {e}'})
+            return self.send(500, {'error': message('message_46' ,e)})
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--host', default='127.0.0.1', help='바인딩할 IPv4 주소. 원격 접속 시 서버의 LAN IP를 지정하세요.')
+    parser.add_argument('--host', default='127.0.0.1', help=message('message_47'))
     parser.add_argument('--port', type=int, default=8765)
     args = parser.parse_args()
     try:
         address = ipaddress.IPv4Address(args.host)
         if address.is_unspecified:
-            parser.error('--host에는 0.0.0.0 대신 접속에 사용할 실제 IPv4 주소를 지정하세요.')
+            parser.error(message('message_48'))
     except ipaddress.AddressValueError:
-        parser.error('--host에는 유효한 IPv4 주소를 지정하세요.')
+        parser.error(message('message_49'))
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f'Factory Studio → http://{args.host}:{server.server_port}', flush=True)
-    print('로컬 Python 코드를 현재 사용자 권한으로 실행합니다. 신뢰하는 프로젝트를 여세요.', flush=True)
+    print(message('message_50'), flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
