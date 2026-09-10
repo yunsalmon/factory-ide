@@ -123,14 +123,29 @@ with sync_playwright() as playwright:
             assert process_result['schema_version'] == 2 and process_result['allocations']
             assert all(event.get('duration') is None for event in process_result['events'] if event['kind'] == 'start')
 
-            for probe, expected in [
-                (changed + "\nimport js\njs.fetch('https://untrusted.invalid/marker')\n", "Import 'js' is unavailable"),
-                (changed + "\nopen('/tmp/factory-public-executed', 'w').write('bad')\n", 'Filesystem access is unavailable'),
-            ]:
-                edit(page, probe)
-                wait_checked(page)
-                run(page)
-                expect(page.locator('.console')).to_contain_text(expected)
+            # The allowlist is a compatibility guide, not the security boundary.
+            # Bypass it deliberately: writes remain in WASM VFS and CSP blocks the
+            # cross-origin request before it reaches the network.
+            host_marker = Path('/tmp/factory-public-executed')
+            assert not host_marker.exists()
+            boundary_probe = changed + '''
+real_import = __import__.__globals__['_original_import']
+js = real_import('js')
+builtins = real_import('builtins')
+os = real_import('os')
+os.makedirs('/usr/share/nginx/html', exist_ok=True)
+print('VFS_WRITE', builtins.open('/usr/share/nginx/html/factory-public-executed', 'w').write('WASM only'))
+print('TMP_VFS_WRITE', builtins.open('/tmp/factory-public-executed', 'w').write('WASM only'))
+js.eval("internalFetch('https://untrusted.invalid/factory-boundary-probe').catch(() => {})")
+'''
+            edit(page, boundary_probe)
+            wait_checked(page)
+            run(page)
+            page.locator('[data-tab="console"]').click()
+            expect(page.locator('.console')).to_contain_text('VFS_WRITE 9')
+            page.wait_for_timeout(500)
+            assert not host_marker.exists()
+            assert page.request.get(base + '/factory-public-executed').status == 404
             assert not any('untrusted.invalid' in url for url in requests)
 
             edit(page, changed + '\nwhile True:\n    pass\n')
@@ -168,6 +183,21 @@ with sync_playwright() as playwright:
             page.locator('#reset-button').click()
             wait_for(page, 'window.factoryStudio.getState().result?.execution?.kind === "precomputed"')
             assert page.locator('#code').input_value() == bundle['source']
+
+            # A browser execution of the unchanged example takes precedence over
+            # the precomputed fallback and restores its replay UI state.
+            run(page)
+            page.evaluate('window.factoryStudio.pause(); seek(15)')
+            page.locator('[data-tab="results"]').click()
+            before_reload = page.evaluate('window.factoryStudio.getState()')
+            assert before_reload['result']['execution']['kind'] == 'browser'
+            assert before_reload['cursor'] == 15
+            page.reload()
+            wait_for(page, 'window.factoryStudio?.getState().eventCount > 0')
+            restored = page.evaluate('window.factoryStudio.getState()')
+            assert restored['result']['execution'] == before_reload['result']['execution']
+            assert restored['cursor'] == 15
+            expect(page.locator('[data-tab="results"]')).to_have_class('active')
 
         for endpoint in ['/api/run', '/api/parse', '/api/bootstrap', '/api/jobs/fake']:
             response = page.request.post(base + endpoint, data={'source': "open('/tmp/factory-public-executed','w').write('bad')"}, headers={'Origin': 'https://untrusted.invalid'})
