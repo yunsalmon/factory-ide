@@ -332,7 +332,9 @@
     "event_location": "위치",
     "event_detail": "상세",
     "lot_id": "로트 ID",
-    "routing_rule": "이동 규칙"
+    "routing_rule": "이동 규칙",
+    "run_complete": "SimPy 실행 완료 · {0}개 이벤트 · 재생 중",
+    "unallocated_location": "{0} · 미할당 · 선택 기록 없음 · 공정도 위치 표시"
   },
   "en": {
     "ui_1": "Arrival",
@@ -667,7 +669,9 @@
     "event_location": "LOCATION",
     "event_detail": "DETAIL",
     "lot_id": "LOT ID",
-    "routing_rule": "ROUTING RULE"
+    "routing_rule": "ROUTING RULE",
+    "run_complete": "SimPy complete · {0} events · playing",
+    "unallocated_location": "{0} · unassigned · no decision record · showing diagram location"
   },
   "ja": {
     "ui_1": "投入",
@@ -1002,6 +1006,8 @@
     "event_location": "位置",
     "event_detail": "詳細",
     "lot_id": "ロットID",
-    "routing_rule": "移動ルール"
+    "routing_rule": "移動ルール",
+    "run_complete": "SimPy実行完了・{0}イベント・再生中",
+    "unallocated_location": "{0}・未割当・選択記録なし・工程図に位置を表示"
   }
 }

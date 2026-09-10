@@ -35,6 +35,8 @@ with sync_playwright() as p:
         state = page.evaluate('window.factoryStudio.getState()')
         for target in ['en', 'ja', 'ko', language]:
             page.locator('#language').select_option(target)
+            expected_status = page.evaluate("tr('run_complete', [window.factoryStudio.getState().eventCount])")
+            expect(page.locator("#status")).to_have_text(expected_status)
             now = page.evaluate('window.factoryStudio.getState()')
             assert (now['cursor'], now['eventCount']) == (state['cursor'], state['eventCount'])
             assert page.locator('#code').input_value() == source
@@ -66,12 +68,34 @@ with sync_playwright() as p:
         page.locator('#timeline').evaluate('(el) => {el.value=el.max;el.dispatchEvent(new Event("input"));}')
         page.locator('[data-tab="allocations"]').click()
         expect(page.locator('#allocation-detail')).to_contain_text('경로 우선순위 → 목적지 대기 수 → FIFO')
-        page.evaluate('(s) => document.querySelector(".CodeMirror").CodeMirror.setValue(s)', source.replace("'duration': 180", "'duration': -1"))
+        # Built-in runtime errors retain descriptors, separately from raw output/tracebacks.
+        failing = source.replace("return machine['time']", "print('RAW 사용자 日本語 console'); return -1")
+        page.evaluate('(s) => document.querySelector(".CodeMirror").CodeMirror.setValue(s)', failing)
+        page.wait_for_function('() => window.factoryStudio.getState().valid && !window.factoryStudio.getState().eventCount')
+        page.locator('#run-button').click()
+        page.wait_for_function('() => document.querySelector("#status").textContent === tr("ui_151")')
+        original_console = page.locator('.console').inner_text()
+        raw_console = original_console.rsplit('\n\n', 1)[0]
+        assert 'RAW 사용자 日本語 console' in raw_console and 'Traceback' in raw_console
+        for target in ['en', 'ja', 'ko', language]:
+            page.locator('#language').select_option(target)
+            expected_error = page.evaluate('tr("message_1", [{code:"message_35", args:["CUT_A"]}, 0.000001, 1000000])')
+            expect(page.locator('.console')).to_have_text(raw_console + '\n\n' + expected_error)
+            expect(page.locator('#toast')).to_have_text(expected_error)
+            assert page.locator('#code').input_value() == failing
+
         # Syntax diagnostic is structured and translates its wrapper, preserving Python's own message.
         page.evaluate('(s) => document.querySelector(".CodeMirror").CodeMirror.setValue(s)', source + '\ninvalid Python ???')
         page.wait_for_function('() => !window.factoryStudio.getState().valid')
         page.locator('[data-tab="console"]').click()
         expect(page.locator('.console')).to_contain_text({'ko':'행:', 'en':'Line ', 'ja':'行:'}[language])
+        page.evaluate('() => editor.scrollIntoView({line: errorLine, ch: 0}, 60)')
+        expect(page.locator('.code-error-line')).to_have_count(1)
+        for target in ['en', 'ja', 'ko']:
+            page.locator('#language').select_option(target)
+            page.evaluate('() => editor.scrollIntoView({line: errorLine, ch: 0}, 60)')
+            expect(page.locator('.code-error-line')).to_have_count(1)
+            assert page.evaluate('editor.lineInfo(errorLine).text') == 'invalid Python ???'
         assert not errors, errors
         context.close()
         print('PASS', language, 'edit/run/reasons/tabs/CSV/save/switch/restore/custom reason/error')

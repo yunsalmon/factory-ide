@@ -26,6 +26,9 @@ const S = {
   zoom: 1,
   warnings: [],
   console: "",
+  runtimeError: null,
+  statusMessage: null,
+  toastMessage: null,
   example: "",
   busy: false,
 };
@@ -59,14 +62,19 @@ async function api(path, body) {
   if (!res.ok) throw Object.assign(new Error(localized(data.error, data.error_message) || `HTTP ${res.status}`), {detail: data.error_message});
   return data;
 }
+function displayMessage(message) {
+  return message?.code ? tr(message.code, message.args) : message || "";
+}
 function toast(message) {
+  S.toastMessage = message;
   clearTimeout(toastTimer);
-  $("#toast").textContent = message;
+  $("#toast").textContent = displayMessage(message);
   $("#toast").hidden = false;
   toastTimer = setTimeout(() => ($("#toast").hidden = true), 3500);
 }
 function status(message) {
-  $("#status").textContent = message;
+  S.statusMessage = message;
+  $("#status").textContent = displayMessage(message);
 }
 function diagnostics(error = "") {
   if (!error) S.parseErrorDetail = null;
@@ -79,9 +87,9 @@ function diagnostics(error = "") {
     editor.removeLineClass(errorLine, "background", "code-error-line");
     errorLine = null;
   }
-  const line = error.match(/^(\d+)행:/);
-  if (editor && line) {
-    errorLine = Number(line[1]) - 1;
+  const line = S.parseErrorDetail?.code === "message_22" ? Number(S.parseErrorDetail.args[0]) : null;
+  if (editor && Number.isInteger(line) && line > 0) {
+    errorLine = line - 1;
     editor.addLineClass(errorLine, "background", "code-error-line");
   }
   $("#diagnostic-count").textContent = (error ? 1 : 0) + S.warnings.length || "";
@@ -91,7 +99,7 @@ function persist() {
   try {
     localStorage.setItem("factory-studio.source.v1", S.source);
   } catch {
-    status(tr("ui_13"));
+    status({code: "ui_13"});
   }
 }
 function setSource(source) {
@@ -156,17 +164,17 @@ async function applyCode(silent = false) {
     $("#project-name").textContent = S.model.name || tr("ui_14");
     $("#mode-label").textContent =
       S.model.mode === "pull" ? tr("ui_15") : tr("ui_16");
-    if (!silent) status(tr("ui_17"));
+    if (!silent) status({code: "ui_17"});
     return true;
   } catch (e) {
     if (revision !== S.revision) return false;
     S.valid = false;
     S.parseErrorDetail = e.detail;
     diagnostics(e.message);
-    status(tr("ui_18"));
+    status({code: "ui_18"});
     if (!silent) {
       selectTab("console");
-      toast(e.message);
+      toast(e.detail || e.message);
     }
     return false;
   }
@@ -196,7 +204,7 @@ async function mutate(change) {
       S.model.mode === "pull" ? tr("ui_15") : tr("ui_16");
     renderTree();
     renderGraph();
-    status(tr("ui_22"));
+    status({code: "ui_22"});
   } finally {
     S.busy = false;
   }
@@ -395,7 +403,7 @@ function renderTrace() {
   const container = $("#trace-content"),
     events = S.result?.events.slice(0, S.cursor) || [];
   if (S.tab === "console") {
-    container.innerHTML = `<pre class="console ${S.parseError ? "error" : ""}">${esc([S.parseError, ...S.warnings.map((w,i) => localized(w, S.warningMessages?.[i])), S.console].filter(Boolean).join("\n\n") || tr("ui_67"))}</pre>`;
+    container.innerHTML = `<pre class="console ${S.parseError ? "error" : ""}">${esc([S.parseError, ...S.warnings.map((w,i) => localized(w, S.warningMessages?.[i])), S.console, displayMessage(S.runtimeError)].filter(Boolean).join("\n\n") || tr("ui_67"))}</pre>`;
     return;
   }
   if (!S.result) {
@@ -499,10 +507,10 @@ function tick() {
   if (stop) {
     pause();
     inspectEvent(next - 1);
-    status(tr("ui_79"));
+    status({code: "ui_79"});
   } else if (next === S.result.events.length) {
     pause();
-    status(tr("ui_80"));
+    status({code: "ui_80"});
   } else playTimer = setTimeout(tick, 240);
 }
 function openInspector(title, html) {
@@ -532,10 +540,10 @@ function bindForm(handler) {
     button.disabled = true;
     try {
       await handler(new FormData(e.target));
-      toast(tr("ui_83"));
+      toast({code: "ui_83"});
     } catch (err) {
       if ($("#form-error")) $("#form-error").textContent = err.message;
-      else toast(err.message);
+      else toast(err.detail || err.message);
     } finally {
       button.disabled = false;
     }
@@ -600,7 +608,7 @@ function inspectMachine(id, newMachine = false) {
           model.routes = model.routes.filter((r) => r.from !== id && r.to !== id);
         });
         closeInspector();
-        toast(tr("ui_93"));
+        toast({code: "ui_93"});
       } catch (e) {
         $("#form-error").textContent = e.message;
       }
@@ -791,8 +799,10 @@ async function run() {
     revision = S.revision,
     ticket = ++runSerial;
   S.busy = true;
+  S.runtimeError = null;
+  S.console = "";
   pause();
-  status(tr("ui_144"));
+  status({code: "ui_144"});
   $("#run-button").textContent = tr("ui_145");
   try {
     const { job_id } = await api("/api/run", { source });
@@ -806,15 +816,15 @@ async function run() {
     } while (job.status === "running");
     if (S.job !== job_id) return;
     if (job.status === "cancelled") {
-      status(tr("ui_146"));
+      status({code: "ui_146"});
       return;
     }
     const p = job.payload;
     S.console = (p.result?.console || p.console || "") + (p.traceback ? "\n" + p.traceback : "");
     if (!p.ok) throw Object.assign(new Error(localized(p.error, p.error_message)), {detail: p.error_message});
     if (S.revision !== revision) {
-      toast(tr("ui_147"));
-      status(tr("ui_148"));
+      toast({code: "ui_147"});
+      status({code: "ui_148"});
       return;
     }
     S.result = p.result;
@@ -827,13 +837,13 @@ async function run() {
     diagnostics();
     selectTab("events");
     seek(Math.min(S.result.events.length, 1));
-    status(`${tr("ui_149")} ${S.result.events.length}${tr("ui_150")}`);
+    status({code: "run_complete", args: [S.result.events.length]});
     play();
   } catch (e) {
-    S.console += "\n" + e.message;
+    S.runtimeError = e.detail || e.message;
     selectTab("console");
-    toast(e.message);
-    status(tr("ui_151"));
+    toast(e.detail || e.message);
+    status({code: "ui_151"});
   } finally {
     if (ticket === runSerial) {
       S.job = null;
@@ -850,7 +860,7 @@ async function cancelRun() {
   S.job = null;
   S.busy = false;
   $("#run-button").textContent = tr("ui_152");
-  status(tr("ui_153"));
+  status({code: "ui_153"});
 }
 function download(filename, text, type = "text/plain") {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -863,7 +873,7 @@ function download(filename, text, type = "text/plain") {
 function save() {
   download("factory_model.py", S.source, "text/x-python");
   $("#dirty-dot").textContent = "";
-  toast(tr("ui_154"));
+  toast({code: "ui_154"});
 }
 function nextId(prefix, items) {
   let i = 1;
@@ -959,9 +969,9 @@ $("#file-input").onchange = async (e) => {
     setSource(source);
     closeInspector();
     await applyCode();
-    toast(tr("ui_157"));
+    toast({code: "ui_157"});
   } catch (e) {
-    toast(e.message);
+    toast(e.detail || e.message);
   } finally {
     $("#file-input").value = "";
   }
@@ -1082,10 +1092,10 @@ async function boot() {
     } catch {}
     renderPlayback();
     renderTrace();
-    status(tr("ui_160"));
+    status({code: "ui_160"});
   } catch (e) {
-    status(tr("ui_161"));
-    toast(e.message);
+    status({code: "ui_161"});
+    toast(e.detail || e.message);
   }
 }
 boot();
@@ -1109,7 +1119,7 @@ function selectResult(row) {
   S.comparison = row.decision;
   seek(row.after, true);
   if (row.decision !== null) selectTab("allocations");
-  else toast(`${row.lot} ${tr("ui_162")}`);
+  else toast({code: "unallocated_location", args: [row.lot]});
 }
 function renderAllocationResults() {
   const projection = allocationResults(S.result, S.cursor, S.resultsFinal, S.resultFilters);
@@ -1176,8 +1186,6 @@ $("#language").onchange = () => {
     const key = Object.keys(translations[oldLocale]).find(k => translations[oldLocale][k] === text);
     return key ? tr(key) : text;
   };
-  const oldStatus = $("#status").textContent;
-  const oldToast = $("#toast").textContent;
   const form = [...($$("#property-form input, #property-form select"))].map(el => ({name: el.name, value: el.value, checked: el.checked}));
   const selected = copy(S.selected), cursor = S.cursor;
   const cmCursor = editor?.getCursor();
@@ -1189,7 +1197,8 @@ $("#language").onchange = () => {
   $("#project-name").textContent = S.model?.name || tr("ui_14");
   $("#mode-label").textContent = tr(S.model?.mode === "push" ? "ui_16" : "ui_15");
   $("#run-button").textContent = tr(S.job ? "ui_145" : "ui_152");
-  status(translateOld(oldStatus)); $("#toast").textContent = translateOld(oldToast);
+  $("#status").textContent = displayMessage(S.statusMessage);
+  $("#toast").textContent = displayMessage(S.toastMessage);
   diagnostics(localized(S.parseError, S.parseErrorDetail) || "");
   renderTree(); renderGraph(); renderMetrics(); renderPlayback(); renderTrace();
   if (inspectorOpen && selected) {
