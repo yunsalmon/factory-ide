@@ -15,6 +15,12 @@ with sync_playwright() as p:
   m=ordered_model();m['orders'][1]['release_time']=0;m['orders'][1]['lots']=[{'id':'LAST','quantity':4}]
   source='MODEL = '+repr(m)+'\nimport random\ndef processing_time(machine, lot, ctx):\n    if MODEL["seed"] == 2: raise ValueError("intentional seed failure")\n    return 1 + random.random()\n'
   page.evaluate('(source)=>editor.setValue(source)',source);page.wait_for_function('()=>S.valid&&!S.busy');page.locator('[data-tab="experiments"]').click();page.locator('#ex-seeds').fill('1,2,3');page.locator('#ex-concurrency').select_option('2')
+  # Cancel during either actual asynchronous definition digest; no pool may start afterward.
+  for blocked_hash in [1,2]:
+   page.evaluate('(block)=>{window.exOriginalHash=scenarioHash;window.exHashCalls=0;window.exHashBlocked=false;window.exWorkerCreations=0;window.exOriginalWorker=Worker;window.Worker=class extends exOriginalWorker{constructor(...args){super(...args);exWorkerCreations++}};scenarioHash=async(...args)=>{exHashCalls++;if(exHashCalls===block){exHashBlocked=true;await new Promise(resolve=>window.exReleaseHash=resolve)}return exOriginalHash(...args)}}',blocked_hash)
+   page.locator('#ex-run').click();page.wait_for_function('()=>exHashBlocked&&EXPERIMENTS.starting');before_workers=page.evaluate('exWorkerCreations');page.locator('#ex-cancel').click();page.evaluate('exReleaseHash()');page.wait_for_function('()=>!EXPERIMENTS.starting');page.wait_for_timeout(100)
+   assert page.evaluate('exWorkerCreations')==before_workers;assert page.evaluate('EXPERIMENTS.runner?.active||false') is False;assert page.evaluate('EXPERIMENTS.items.length')==0;assert page.evaluate('exHashCalls')==blocked_hash
+   page.evaluate('()=>{scenarioHash=exOriginalHash;window.Worker=exOriginalWorker}')
   page.evaluate('()=>{window.exTicks=0;window.exLast=performance.now();window.exMaxGap=0;window.exTimer=setInterval(()=>{const now=performance.now();exMaxGap=Math.max(exMaxGap,now-exLast);exLast=now;exTicks++},25)}')
   for i in range(2):
    page.locator('#ex-name').fill('Run '+str(i));page.evaluate('()=>{startExperiment();startExperiment()}');page.wait_for_function('(n)=>EXPERIMENTS.items.length===n&&!EXPERIMENTS.runner.active',arg=i+1,timeout=120000)
@@ -24,7 +30,9 @@ with sync_playwright() as p:
   assert page.evaluate('experimentCompare(...EXPERIMENTS.items).every(r=>r.delta===0||r.delta===null)')
   assert 'Translation unavailable' not in page.locator('.experiments').inner_text();assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
   with page.expect_download() as download:page.locator('#ex-export').click()
-  raw=Path(download.value.path()).read_bytes();before=page.evaluate('JSON.stringify(EXPERIMENTS.items)');page.evaluate('EXPERIMENTS.items=[];renderExperiments()');requests=[];page.on('request',lambda r:requests.append(r.url))
+  raw=Path(download.value.path()).read_bytes();before=page.evaluate('JSON.stringify(EXPERIMENTS.items)');tampered=raw.replace(b'"lot": null',b'"lot": 1e309',1);assert tampered!=raw
+  page.locator('#ex-import').set_input_files({'name':'tampered.json','mimeType':'application/json','buffer':tampered});expect(page.locator('#ex-error')).to_have_text(page.evaluate('tr("ex_invalid")'));assert page.evaluate('JSON.stringify(EXPERIMENTS.items)')==before
+  page.evaluate('EXPERIMENTS.items=[];renderExperiments()');requests=[];page.on('request',lambda r:requests.append(r.url))
   page.locator('#ex-import').set_input_files({'name':'experiments.json','mimeType':'application/json','buffer':raw});page.wait_for_function('()=>EXPERIMENTS.items.length===2');assert page.evaluate('JSON.stringify(EXPERIMENTS.items)')==before
   page.locator('[data-ex-replay="0"]').click();assert not any('/runtime/' in url or '/api/run' in url for url in requests)
   # Terminate both real Workers during long custom processing, then clean recovery.
