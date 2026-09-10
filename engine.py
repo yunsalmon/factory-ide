@@ -5,6 +5,8 @@ import copy
 import random
 import simpy
 from model import ModelError, number, parse, validate, migrate_model
+from disruptions import compile_disruptions, ResourcePool
+from operation_metrics import operation_metrics
 
 
 class Factory:
@@ -28,18 +30,21 @@ class Factory:
         self.buffers = {b['id']: dict(b, contents=[]) for b in self.model['buffers']}
         self.buffer_at = {b['at']: b['id'] for b in self.model['buffers']}
         self.stages = {mid: dict(state='idle', lot=None, cause='initialized') for mid in self.machines}
-        self.calendar = {mid: None for mid in self.machines}
+        self.disruptions = compile_disruptions(self.model)
+        self.resource_pool = ResourcePool(self)
+        self.families = {mid: m.get('initial_family') for mid, m in self.machines.items()}
         self.operations = {mid: dict(state='idle', lot=None, since=0, cause='initialized') for mid in self.machines}
         self.initial_state = dict(lots={}, machines={mid: dict(state='idle', lot=None) for mid in self.machines},
-                                  buffers=copy.deepcopy(self.buffers), machine_operations=copy.deepcopy(self.operations))
+                                  buffers=copy.deepcopy(self.buffers), machine_operations=copy.deepcopy(self.operations), resources=self.resource_pool.snapshot())
         self.last_buffers = copy.deepcopy(self.buffers)
         self.last_operations = copy.deepcopy(self.operations)
+        self.last_resources = self.resource_pool.snapshot()
         self.source_pending = None
         self.order_plan = normalize_orders(model)
         self.order_headers = {o["id"]: {k: copy.deepcopy(v) for k, v in o["raw"].items() if k != "lots"} for o in self.order_plan}
         self.order_pending = set()
-        if process and any(m.get('availability') for m in self.machines.values()):
-            raise ModelError('Custom process_lot cannot be combined with availability windows; use processing_time for pausable work')
+        if process and (any(self.disruptions.values()) or any(any(m.get('resource_requirements', {}).values()) for m in self.machines.values())):
+            raise ModelError(message('ops_hook_unsupported'))
 
     @staticmethod
     def default_choose(candidates, context):
@@ -68,11 +73,14 @@ class Factory:
                 machines[mid] = value
         lots = {lid: value for lid, value in self.lots.items() if self.last_lots.get(lid) != value}
         buffers = {bid: b for bid, b in self.buffers.items() if self.last_buffers.get(bid) != b}
+        resource_state = self.resource_pool.snapshot()
+        resources = {rid: value for rid, value in resource_state.items() if self.last_resources.get(rid) != value}
         operations = {mid: op for mid, op in self.operations.items() if self.last_operations.get(mid) != op}
         self.last_lots.update(copy.deepcopy(lots))
         self.last_machines.update(copy.deepcopy(machines))
         self.last_buffers.update(copy.deepcopy(buffers))
         self.last_operations.update(copy.deepcopy(operations))
+        self.last_resources.update(copy.deepcopy(resources))
         if descriptor(extra.get('reason')):
             extra['reason_message'] = descriptor(extra['reason'])
         self.assert_inventory()
@@ -80,9 +88,10 @@ class Factory:
             kind=kind, lot=lot, affected_lot_id=affected['id'] if affected else None,
             allocation_id=extra.pop('allocation_id', affected.get('allocation_id') if affected else None),
             state_changes=dict(lots=lots, machines=machines,
-                               buffers=buffers, machine_operations=operations), **extra)))
+                               buffers=buffers, machine_operations=operations, resources=resources), **extra)))
 
     def assert_inventory(self):
+        self.resource_pool.assert_capacity()
         members = {}
         for bid, b in self.buffers.items():
             if b['capacity'] is not None and len(b['contents']) > b['capacity']:
@@ -145,41 +154,68 @@ class Factory:
             return
         lot = self.lots.get(lid)
         if lot and lot['placement'] == dict(kind='machine', id=mid):
-            lot['state'] = state if state in ('processing', 'setup', 'down', 'offshift', 'blocked') else 'waiting'
+            lot['state'] = state if state in ('processing', 'setup', 'down', 'offshift', 'blocked', 'maintenance', 'resource_wait') else 'waiting'
         self.operations[mid] = dict(value, since=self.env.now)
+        released = self.resource_pool.release_machine(mid) if window else []
         self.emit('machine_state', lot, machine=mid, allocation_id=None,
-                  transition=dict(previous=dict(previous, end=self.env.now, duration=self.env.now - previous['since']),
+                  resource_releases=released, transition=dict(previous=dict(previous, end=self.env.now, duration=self.env.now - previous['since']),
                                   current=self.operations[mid]))
 
     def machine_calendar(self, machine):
         mid = machine['id']
-        for window in machine.get('availability', []):
-            yield self.env.timeout(window['start'] - self.env.now)
-            self.calendar[mid] = window
-            self.update_operation(mid)
-            self.wake()
-            yield self.env.timeout(window['end'] - self.env.now)
-            self.calendar[mid] = None
+        boundaries = sorted({time for window in self.disruptions[mid] for time in (window['start'], window['end'])})
+        for boundary in boundaries:
+            yield self.env.timeout(boundary - self.env.now)
             self.update_operation(mid)
             self.wake()
 
     def unavailable(self, machine):
-        # Consult intervals as well as calendar callbacks: same-time timeout
-        # ordering cannot allow work at a half-open unavailable boundary.
-        return next((w for w in machine.get('availability', []) if w['start'] <= self.env.now < w['end']), None)
+        active = [w for w in self.disruptions[machine['id']] if w['start'] <= self.env.now < w['end']]
+        priority = {'down': 3, 'maintenance': 2, 'offshift': 1}
+        return max(active, key=lambda w: (priority[w['state']], w.get('source') in ('seeded_failure', 'deterministic_failure'), -w['start']), default=None)
 
     def wait_available(self, machine):
         while self.unavailable(machine):
             yield self.env.timeout(self.unavailable(machine)['end'] - self.env.now)
 
+    def next_disruption(self, machine):
+        return min((w['start'] for w in self.disruptions[machine['id']] if w['start'] > self.env.now), default=float('inf'))
+
     def active_delay(self, machine, duration):
         remaining = duration
         while remaining > 0:
             yield from self.wait_available(machine)
-            next_start = min((w['start'] for w in machine.get('availability', []) if w['start'] > self.env.now), default=float('inf'))
-            elapsed = min(remaining, next_start - self.env.now)
+            elapsed = min(remaining, self.next_disruption(machine) - self.env.now)
             yield self.env.timeout(elapsed)
             remaining -= elapsed
+
+    def resource_work(self, machine, lot, phase, duration, on_start=None):
+        remaining, started = duration, False
+        requirements = machine.get('resource_requirements', {}).get(phase, {})
+        while remaining > 0:
+            yield from self.wait_available(machine)
+            request = yield from self.resource_pool.acquire(requirements, lot, machine['id'], phase)
+            self.set_stage(machine['id'], phase, lot, 'lot_setup' if phase == 'setup' else 'processing_started')
+            if not started and on_start:
+                on_start()
+            started = True
+            elapsed = min(remaining, self.next_disruption(machine) - self.env.now)
+            yield self.env.timeout(elapsed)
+            remaining -= elapsed
+            # Calendar callbacks may already have released this request atomically.
+            if self.unavailable(machine): self.update_operation(machine['id'])
+            self.resource_pool.release(request, cause='phase_complete' if remaining <= 0 else 'calendar_preemption')
+
+    def setup_duration(self, machine, lot):
+        family = self.model.get('product_families', {}).get(lot['product'], lot['product'])
+        previous = self.families[machine['id']]
+        if 'setup_matrix' not in machine:
+            duration = machine.get('setup_time', 0)
+        else:
+            matrix = machine['setup_matrix']
+            duration = matrix.get(previous or '*', {}).get(family,
+                matrix.get('*', {}).get(family, 0 if previous == family else machine.get('setup_time', 0)))
+        return previous, family, duration
 
     def eligible_queue_heads(self, candidates):
         heads = {}
@@ -344,10 +380,12 @@ class Factory:
             self.ready(lot)
 
     def ship(self, lot, route):
+        request = yield from self.resource_pool.acquire(route.get('resources', {}), lot, None, 'transport')
         self.depart(lot, route)
         lot.update(state='moving', target='OUTPUT', route=route['id'])
         self.emit('move', lot, route=route['id'], machine=None)
         yield self.env.timeout(route['delay'])
+        self.resource_pool.release(request)
         bid = self.buffer_at['OUTPUT']
         if not self.has_space(bid):
             lot['state'] = 'blocked'
@@ -395,31 +433,41 @@ class Factory:
                 route = next(r for r in self.model['routes'] if r['id'] == selected['route_id'])
             # Claim synchronously, before yielding: a lot cannot be claimed twice.
             self.busy[mid] = lot['id']
+            request = yield from self.resource_pool.acquire(route.get('resources', {}), lot, mid, 'transport')
             self.set_stage(mid, 'reserved', lot, 'transport_reservation')
             self.depart(lot, route)
             lot.update(state='moving', target=mid, route=route['id'])
             self.emit('move', lot, route=route['id'], machine=mid)
             yield self.env.timeout(route['delay'])
+            self.resource_pool.release(request)
             lot['placement'] = dict(kind='machine', id=mid)
             lot['location'] = mid
             lot['state'] = 'waiting'
             self.emit('transport_arrive', lot, machine=mid, allocation_id=None)
             yield from self.wait_available(machine)
-            if machine.get('setup_time', 0):
-                self.set_stage(mid, 'setup', lot, 'lot_setup')
-                yield from self.active_delay(machine, machine['setup_time'])
+            previous_family, family, setup = self.setup_duration(machine, lot)
+            if setup or 'setup_matrix' in machine:
+                self.emit('setup_plan', lot, machine=mid, allocation_id=None,
+                          previous_family=previous_family, family=family, duration=setup)
+                if setup:
+                    yield from self.resource_work(machine, lot, 'setup', setup)
+                self.families[mid] = family
+                self.emit('setup_complete', lot, machine=mid, allocation_id=None, family=family, duration=setup)
+            else:
+                self.families[mid] = family
             yield from self.wait_available(machine)
             context = {'now': self.env.now, 'rng': self.rng, 'shared': self.shared}
             duration = None if self.custom_process else self.timing(copy.deepcopy(machine), copy.deepcopy(lot), context)
             if duration is not None:
                 number(duration, message('message_35' ,mid), .000001)
-            lot.update(state='processing', location=mid, target=mid)
-            self.set_stage(mid, 'processing', lot, 'processing_started')
-            self.emit('start', lot, machine=mid, duration=duration)
+            lot.update(location=mid, target=mid)
             if self.custom_process:
+                self.set_stage(mid, 'processing', lot, 'processing_started')
+                self.emit('start', lot, machine=mid, duration=duration)
                 yield self.env.process(self.custom_process(self.env, copy.deepcopy(machine), copy.deepcopy(lot), context))
             else:
-                yield from self.active_delay(machine, duration)
+                yield from self.resource_work(machine, lot, 'processing', duration,
+                    on_start=lambda: self.emit('start', lot, machine=mid, duration=duration))
             bid = self.buffer_at[mid]
             lot['state'] = 'blocked' if not self.has_space(bid) else 'waiting'
             self.set_stage(mid, 'blocked' if not self.has_space(bid) else 'reserved', lot,
@@ -441,7 +489,7 @@ class Factory:
         halted = self.env.peek() == float('inf')
         diagnostics = []
         for mid, op in self.operations.items():
-            if op['state'] in ('blocked', 'starved', 'down', 'offshift'):
+            if op['state'] in ('blocked', 'starved', 'down', 'offshift', 'maintenance', 'resource_wait'):
                 related = [b for b in self.buffers.values() if mid in b['upstream'] or mid in b['downstream']]
                 diagnostics.append(dict(code='deadlock' if halted else 'horizon_wait', machine=mid,
                     state=op['state'], cause=op['cause'], lot=op['lot'],
@@ -489,8 +537,12 @@ class Factory:
         return dict(schema_version=2, operational_schema_version=1, initial_state=self.initial_state,
                     order_schema_version=1, order_plan=self.order_plan,
                     operational_diagnostics=diagnostics, allocations=self.allocations, events=self.events, model=self.model, warnings=warnings, warning_messages=[descriptor(w) for w in warnings],
+        result = dict(schema_version=2, operational_schema_version=2, disruption_plan=self.disruptions, initial_state=self.initial_state,
+                    operational_diagnostics=self.diagnose(), allocations=self.allocations, events=self.events, model=self.model, warnings=warnings, warning_messages=[descriptor(w) for w in warnings],
                     summary=dict(completed=len(completed), arrived=len(self.lots), horizon=self.model['duration'],
                                  mean_cycle_time=sum(l['completed'] - l['created'] for l in completed) / len(completed) if completed else 0))
+        result['operation_metrics'] = operation_metrics(result)
+        return result
 
 
 def execute(source):
