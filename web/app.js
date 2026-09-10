@@ -31,7 +31,11 @@ const S = {
   statusMessage: null,
   toastMessage: null,
   example: "",
+  demoResult: null,
+  demoVersion: null,
   busy: false,
+  runtimeState: "idle",
+  runtimeErrorLine: null,
 };
 let parseTimer,
   playTimer,
@@ -41,6 +45,9 @@ let parseTimer,
   editor = null,
   settingEditor = false,
   errorLine = null;
+const browserRuntime = PUBLIC_DEMO
+  ? new BrowserPythonRuntime({onState: (state, runtime) => renderRuntimeState(state, runtime)})
+  : null;
 const kinds = {
   get arrival() { return tr("ui_1"); },
   get ready() { return tr("ui_2"); },
@@ -78,6 +85,28 @@ function status(message) {
   S.statusMessage = message;
   $("#status").textContent = displayMessage(message);
 }
+function renderRuntimeState(state, runtime) {
+  S.runtimeState = state;
+  const labels = {
+    idle: "public_runtime_idle",
+    loading: "public_runtime_loading",
+    checking: "public_runtime_checking",
+    ready: "public_runtime_ready",
+    running: "public_runtime_running",
+    stopped: "public_runtime_stopped",
+  };
+  $("#runtime-status").textContent = runtime
+    ? `${tr(labels[state] || "public_runtime_ready")} · Python ${runtime.python} · SimPy ${runtime.simpy}`
+    : tr(labels[state] || "public_runtime_idle");
+}
+function markErrorLine(line) {
+  if (editor && errorLine !== null) editor.removeLineClass(errorLine, "background", "code-error-line");
+  errorLine = null;
+  if (editor && Number.isInteger(Number(line)) && Number(line) > 0) {
+    errorLine = Number(line) - 1;
+    editor.addLineClass(errorLine, "background", "code-error-line");
+  }
+}
 function diagnostics(error = "") {
   if (!error) S.parseErrorDetail = null;
   $("#sync-status").textContent = error
@@ -85,21 +114,14 @@ function diagnostics(error = "") {
     : tr("ui_12");
   $("#sync-status").className = error ? "error" : "good";
   S.parseError = error;
-  if (editor && errorLine !== null) {
-    editor.removeLineClass(errorLine, "background", "code-error-line");
-    errorLine = null;
-  }
-  const line = S.parseErrorDetail?.code === "message_22" ? Number(S.parseErrorDetail.args[0]) : null;
-  if (editor && Number.isInteger(line) && line > 0) {
-    errorLine = line - 1;
-    editor.addLineClass(errorLine, "background", "code-error-line");
-  }
+  const line = S.runtimeErrorLine || (S.parseErrorDetail?.code === "message_22" ? Number(S.parseErrorDetail.args[0]) : null);
+  markErrorLine(line);
   $("#diagnostic-count").textContent = (error ? 1 : 0) + S.warnings.length || "";
   if (S.tab === "console") renderTrace();
 }
 function persist() {
   try {
-    localStorage.setItem("factory-studio.source.v1", S.source);
+    localStorage.setItem(PUBLIC_DEMO ? "factory-studio.public.source.v1" : "factory-studio.source.v1", S.source);
   } catch {
     status({code: "ui_13"});
   }
@@ -150,17 +172,17 @@ function invalidateTrace() {
   renderGraph();
 }
 async function applyCode(silent = false) {
-  if (PUBLIC_DEMO) return toast({code: "public_scope"});
   clearTimeout(parseTimer);
   const revision = S.revision,
     source = S.source;
   try {
-    const data = await api("/api/parse", { source });
+    const data = PUBLIC_DEMO ? await browserRuntime.parse(source) : await api("/api/parse", { source });
     if (revision !== S.revision) return false;
     S.model = data.model;
     S.warnings = data.warnings;
     S.warningMessages = data.warning_messages || [];
     S.valid = true;
+    S.runtimeErrorLine = null;
     diagnostics();
     renderTree();
     renderGraph();
@@ -172,12 +194,12 @@ async function applyCode(silent = false) {
   } catch (e) {
     if (revision !== S.revision) return false;
     S.valid = false;
-    S.parseErrorDetail = e.detail;
-    diagnostics(e.message);
+    S.parseErrorDetail = e.detail || e.error_message;
+    diagnostics(localized(e.message, S.parseErrorDetail));
     status({code: "ui_18"});
     if (!silent) {
       selectTab("console");
-      toast(e.detail || e.message);
+      toast(e.detail || e.error_message || e.message);
     }
     return false;
   }
@@ -792,20 +814,29 @@ function inspectLot(id, refresh = true) {
   }
 }
 async function run() {
-  if (PUBLIC_DEMO) return toast({code: "public_scope"});
   if (S.job) {
     await cancelRun();
     return;
   }
   if (S.busy) return;
+  const ticket = ++runSerial,
+    browserJobId = PUBLIC_DEMO ? `browser-${ticket}` : null;
   S.busy = true;
+  if (browserJobId) {
+    S.job = browserJobId;
+    $("#run-button").textContent = tr("ui_145");
+  }
   if (!(await applyCode())) {
+    if (ticket === runSerial) {
+      S.job = null;
+      $("#run-button").textContent = tr("ui_152");
+    }
     S.busy = false;
     return;
   }
   const source = S.source,
-    revision = S.revision,
-    ticket = ++runSerial;
+    revision = S.revision;
+  if (ticket !== runSerial) return;
   S.busy = true;
   S.runtimeError = null;
   S.console = "";
@@ -813,21 +844,28 @@ async function run() {
   status({code: "ui_144"});
   $("#run-button").textContent = tr("ui_145");
   try {
-    const { job_id } = await api("/api/run", { source });
-    S.job = job_id;
-    S.busy = false;
-    let job;
-    do {
-      await new Promise((r) => setTimeout(r, 120));
+    let p;
+    if (PUBLIC_DEMO) {
+      S.busy = false;
+      p = await browserRuntime.run(source);
+      if (S.job !== browserJobId) return;
+    } else {
+      const { job_id } = await api("/api/run", { source });
+      S.job = job_id;
+      S.busy = false;
+      let job;
+      do {
+        await new Promise((r) => setTimeout(r, 120));
+        if (S.job !== job_id) return;
+        job = await api("/api/jobs/" + job_id);
+      } while (job.status === "running");
       if (S.job !== job_id) return;
-      job = await api("/api/jobs/" + job_id);
-    } while (job.status === "running");
-    if (S.job !== job_id) return;
-    if (job.status === "cancelled") {
-      status({code: "ui_146"});
-      return;
+      if (job.status === "cancelled") {
+        status({code: "ui_146"});
+        return;
+      }
+      p = job.payload;
     }
-    const p = job.payload;
     S.console = (p.result?.console || p.console || "") + (p.traceback ? "\n" + p.traceback : "");
     if (!p.ok) throw Object.assign(new Error(localized(p.error, p.error_message)), {detail: p.error_message});
     if (S.revision !== revision) {
@@ -835,22 +873,38 @@ async function run() {
       status({code: "ui_148"});
       return;
     }
+    if (PUBLIC_DEMO) {
+      const sourceHash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source)))]
+        .map((value) => value.toString(16).padStart(2, "0")).join("");
+      p.result.execution = {
+        kind: "browser",
+        source_sha256: sourceHash,
+        source_revision: S.demoVersion.source_revision,
+        runtime: copy(browserRuntime.runtime),
+      };
+    }
     S.result = p.result;
     S.warnings = p.result.warnings;
     S.warningMessages = p.result.warning_messages || [];
     S.cursor = 0;
     S.lot = null;
     S.selected = null;
+    S.runtimeErrorLine = null;
     $("#inspector").hidden = true;
     diagnostics();
     selectTab("events");
     seek(Math.min(S.result.events.length, 1));
     status({code: "run_complete", args: [S.result.events.length]});
+    persistReplay();
     play();
   } catch (e) {
-    S.runtimeError = e.detail || e.message;
+    if (ticket !== runSerial) return;
+    S.console = (e.console || S.console || "") + (e.traceback ? "\n" + e.traceback : "");
+    S.runtimeError = e.code === "browser_timeout" ? {code: "public_timeout"} : e.detail || e.error_message || e.message;
+    S.runtimeErrorLine = e.line || null;
+    markErrorLine(S.runtimeErrorLine);
     selectTab("console");
-    toast(e.detail || e.message);
+    toast(S.runtimeError);
     status({code: "ui_151"});
   } finally {
     if (ticket === runSerial) {
@@ -863,7 +917,8 @@ async function run() {
 async function cancelRun() {
   const id = S.job;
   if (!id) return;
-  await api("/api/cancel", { job_id: id });
+  if (PUBLIC_DEMO) browserRuntime.stop();
+  else await api("/api/cancel", { job_id: id });
   ++runSerial;
   S.job = null;
   S.busy = false;
@@ -892,6 +947,8 @@ $("#code").addEventListener("input", () => {
   S.source = $("#code").value;
   S.revision++;
   S.valid = false;
+  S.runtimeError = null;
+  S.runtimeErrorLine = null;
   persist();
   updateEditor();
   invalidateTrace();
@@ -914,6 +971,27 @@ $("#code").addEventListener("keydown", (e) => {
 $("#apply-code").onclick = () => applyCode();
 $("#run-button").onclick = run;
 $("#save-button").onclick = save;
+$("#reset-button").onclick = async () => {
+  if (!PUBLIC_DEMO) return;
+  if (S.job) await cancelRun();
+  browserRuntime.stop();
+  pause();
+  setSource(S.example);
+  S.result = copy(S.demoResult);
+  S.model = S.result.model;
+  S.warnings = S.result.warnings;
+  S.warningMessages = S.result.warning_messages || [];
+  S.runtimeError = null;
+  S.runtimeErrorLine = null;
+  S.console = S.result.console || "";
+  S.valid = true;
+  try {
+    localStorage.removeItem("factory-studio.public.source.v1");
+    localStorage.removeItem("factory-studio.public.replay.v1");
+  } catch {}
+  diagnostics(); renderTree(); renderGraph(); seek(1); selectTab("events");
+  status({code: "public_reset_done"});
+};
 $("#settings-button").onclick = inspectSettings;
 $("#close-inspector").onclick = closeInspector;
 $("#add-machine").onclick = () => S.model && inspectMachine(nextId("M", S.model.machines), true);
@@ -971,7 +1049,8 @@ $("#file-input").onchange = async (e) => {
   try {
     if (file.size > 1_000_000) throw new Error(tr("ui_156"));
     const source = await file.text();
-    await api("/api/parse", { source });
+    if (PUBLIC_DEMO) await browserRuntime.parse(source);
+    else await api("/api/parse", { source });
     if (S.job) await cancelRun();
     invalidateTrace();
     setSource(source);
@@ -1084,15 +1163,35 @@ async function boot() {
       const response = await fetch("/demo.json");
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      S.source = S.example = data.source;
-      setSource(data.source);
-      editor?.setOption("readOnly", true);
-      $("#code").readOnly = true;
-      S.model = data.result.model; S.result = data.result; S.valid = true;
+      S.example = data.source;
+      S.demoResult = copy(data.result);
+      S.demoVersion = data.version;
+      let restoredPublicReplay = false;
+      let source = data.source;
+      try { source = localStorage.getItem("factory-studio.public.source.v1") || source; } catch {}
+      setSource(source);
+      S.model = data.result.model; S.result = source === data.source ? copy(data.result) : null; S.valid = source === data.source;
       S.warnings = data.result.warnings; S.warningMessages = data.result.warning_messages;
-      $("#demo-version").textContent = `${data.version.source_revision} · trace v${data.result.schema_version} · ${data.version.trace_sha256}`;
+      const runtime = data.version.browser_runtime;
+      $("#demo-version").textContent = `${data.version.source_revision} · trace v${data.result.schema_version} · Pyodide ${runtime.pyodide} · Python ${runtime.python} · SimPy ${runtime.simpy} · ${data.version.trace_sha256}`;
+      if (source !== data.source) {
+        await applyCode(true);
+      }
+      try {
+        const saved = JSON.parse(localStorage.getItem("factory-studio.public.replay.v1"));
+        if (saved?.source === source && saved.result?.schema_version === 2) {
+          S.model = saved.result.model; S.result = saved.result; S.valid = true;
+          S.cursor = Number.isInteger(saved.cursor) && saved.cursor >= 0 && saved.cursor <= S.result.events.length ? saved.cursor : 1;
+          S.tab = saved.tab || "events";
+          S.resultsFinal = saved.resultsFinal || false; S.resultFilters = saved.filters || {};
+          S.warnings = S.result.warnings; S.warningMessages = S.result.warning_messages || [];
+          restoredPublicReplay = true;
+        }
+      } catch {}
       $("#project-name").textContent = S.model.name;
-      diagnostics(); renderTree(); renderGraph(); seek(1); selectTab("events");
+      diagnostics(); renderTree(); renderGraph();
+      seek(S.result ? (restoredPublicReplay ? S.cursor : 1) : 0);
+      selectTab(S.result ? S.tab : "console");
       status({code: "public_ready"});
       return;
     }
@@ -1132,6 +1231,8 @@ window.factoryStudio = {
     valid: S.valid,
     playing: S.playing,
     job: S.job,
+    runtimeState: S.runtimeState,
+    result: copy(S.result),
   }),
   pause,
 };
@@ -1198,10 +1299,10 @@ function renderAllocationResults() {
 }
 
 function persistReplay() {
-  if (PUBLIC_DEMO) return;
   try {
-    if (S.result) localStorage.setItem("factory-studio.replay.v1", JSON.stringify({source: S.source, result: S.result, cursor: S.cursor, tab: S.tab, resultsFinal: S.resultsFinal, filters: S.resultFilters}));
-    else localStorage.removeItem("factory-studio.replay.v1");
+    const key = PUBLIC_DEMO ? "factory-studio.public.replay.v1" : "factory-studio.replay.v1";
+    if (S.result) localStorage.setItem(key, JSON.stringify({source: S.source, result: S.result, cursor: S.cursor, tab: S.tab, resultsFinal: S.resultsFinal, filters: S.resultFilters}));
+    else localStorage.removeItem(key);
   } catch { /* Source saving remains independent when a large trace exceeds quota. */ }
 }
 window.addEventListener("pagehide", persistReplay);
@@ -1222,6 +1323,7 @@ $("#language").onchange = () => {
   $("#project-name").textContent = S.model?.name || tr("ui_14");
   $("#mode-label").textContent = tr(S.model?.mode === "push" ? "ui_16" : "ui_15");
   $("#run-button").textContent = tr(S.job ? "ui_145" : "ui_152");
+  if (PUBLIC_DEMO) renderRuntimeState(S.runtimeState, browserRuntime.runtime);
   $("#status").textContent = displayMessage(S.statusMessage);
   $("#toast").textContent = displayMessage(S.toastMessage);
   diagnostics(localized(S.parseError, S.parseErrorDetail) || "");

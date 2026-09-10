@@ -2,11 +2,13 @@
 
 The proposed address is `https://factory.yshnote.com`; it is **not configured or accepted by this change**. Record the actual accepted URL, commit, image ID, trace hash, UTC time and external browser evidence in the release record after publication. Local container checks do not satisfy external HTTPS acceptance.
 
-The public artifact contains HTML/JS/CSS, the example Python source as data, its model/process graph and a precomputed schema-v2 trace. It never starts `server.py` or `worker.py`. Nginx rejects `/api/*`; its image has no Python executable. The public editor is read-only, mutation controls are unavailable, API calls are guarded, and local execution is linked from every language. The bundled sample ends at minute 55 with completed and unfinished lots, multiple choice candidates and actual cross-line allocations. The UI uses the existing locale catalogue for selection reasons and allocation results.
+The public artifact contains HTML/JS/CSS, checksum-pinned Pyodide 0.27.7 and SimPy 4.1.1, and a precomputed schema-v2 fallback. It never starts `server.py` or `worker.py`; Nginx rejects `/api/*` and its image has no native Python executable. Python runs in a dedicated browser Web Worker and returns the existing result contract. Stop or the eight-second limit destroys that worker, so the next run starts a fresh interpreter. Reload restores matching browser-local source/results; **Reset to example** clears them and restores the fallback.
+
+The import and `open()` allowlist guides code toward the supported model contract; it is not a security boundary inside the Python interpreter. Advanced Python can inspect the Pyodide virtual filesystem or JS bridge. That filesystem exists only in the disposable WebAssembly worker and is not the host/container filesystem. Host and network isolation comes from the dedicated Worker, absence of DOM/server credentials and native execution APIs, the static container, and its CSP (`connect-src 'self'`).
 
 ## Reproducible build and isolated validation
 
-Use a clean checkout of the exact reviewed commit; do not tag modified working trees as that commit. Base images are pinned by digest; record final image IDs for exact rollback. Python dependency versions are pinned in requirements.txt.
+Use a clean checkout of the exact reviewed commit; do not tag modified working trees as that commit. Base images are pinned by digest; record final image IDs for exact rollback. `scripts/fetch_browser_runtime.py` pins and verifies every browser runtime URL and SHA-256 in a reusable build cache.
 
 ```sh
 git status --porcelain
@@ -25,9 +27,9 @@ curl --retry 5 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:13084/v
 docker rm -f factory-demo-check
 ```
 
-Install requirements-dev.txt and `python -m playwright install chromium` in the build/test environment. Build/test Python is never included in the runtime image. For other static hosts, `python scripts/build_public.py --output dist` creates the root document; configure GET/HEAD only, no API/function proxies, root asset paths, JSON/JS MIME types and no stale HTML caching. `/`, `/?demo=1#replay`, `/install.html` and `/version.json` are supported direct links; unknown paths return 404 rather than a misleading successful SPA response.
+Install requirements-dev.txt and `python -m playwright install chromium` in the build/test environment. Build/test Python is never included in the runtime image. For other static hosts, `python scripts/build_public.py --output dist` creates the root document; configure GET/HEAD only, no API/function proxies, root asset paths, JSON/JS/WASM MIME types and no stale HTML caching. Preserve the Nginx CSP split: generated-code permission is scoped to `/browser-worker.js`. `/`, `/?demo=1#replay`, `/install.html` and `/version.json` are supported direct links; unknown paths return 404.
 
-`version.json` and the on-screen version identify the full source commit, example-source SHA256, schema version and canonical trace SHA256. All assets are replaced together through an immutable image. `demo.json` includes its own version so an open browser retains coherent source/trace attribution across an update. Hashes are validated by the browser acceptance test.
+`version.json` and the on-screen version identify the source commit, source/schema/trace hashes, runtime versions and every runtime artifact hash. Custom result JSON records its executed source hash, source revision and actual worker versions. All assets are replaced together through an immutable image.
 
 ## Proposed ingress connection (infra/service coordination required)
 
