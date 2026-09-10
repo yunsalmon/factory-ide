@@ -40,6 +40,7 @@ const kinds = {
   ready: "대기",
   decision: "로트 선택",
   assigned: "목적지 배정",
+  route_preference: "경로 선택 · 예약 대기",
   move: "이동",
   start: "처리 시작",
   finish: "처리 종료",
@@ -235,7 +236,7 @@ function stateAt(cursor = S.cursor) {
 function renderAllocationComparison() {
   const records = S.result.events.filter(e => ["decision", "blocked"].includes(e.kind));
   const current = records.find(e => e.index === S.comparison);
-  const select = `<label>선택 기록 <select id="allocation-select" aria-label="할당 선택"><option value="">기록 선택</option>${records.map(e => `<option value="${e.index}" ${e === current ? "selected" : ""}>#${e.index} · ${fmt(e.time)}m · ${esc(e.allocation_id || (e.kind === "blocked" ? "경로 없음" : "미선택"))} · ${esc(e.lot.id)}</option>`).join("")}</select></label>`;
+  const select = `<label>선택 기록 <select id="allocation-select" aria-label="할당 선택"><option value="">기록 선택</option>${records.map(e => `<option value="${e.index}" ${e === current ? "selected" : ""}>#${e.index} · ${fmt(e.time)}m · ${esc(e.allocation_id || (e.kind === "blocked" ? "경로 없음" : e.outcome === "route_preference" ? "경로 선택 · 예약 전" : "미선택"))} · ${esc(e.lot.id)}</option>`).join("")}</select></label>`;
   const container = $("#trace-content");
   container.innerHTML = `<div class="allocation-comparison">${select}<div id="allocation-detail"></div></div>`;
   $("#allocation-select").onchange = e => {
@@ -244,14 +245,14 @@ function renderAllocationComparison() {
   if (!current) { $("#allocation-detail").textContent = "재생 시점의 선택 기록이 없습니다. 기록을 선택해 전후를 비교하세요."; return; }
   const allocation = S.result.allocations.find(a => a.id === current.allocation_id);
   const beforeCursor = allocation?.before_cursor ?? current.index;
-  const afterCursor = allocation?.after_cursor ?? current.index + 1;
+  const afterCursor = allocation?.after_cursor ?? current.index + (current.outcome === "route_preference" ? 2 : 1);
   const before = stateAt(beforeCursor), after = stateAt(afterCursor);
   const labels = {waiting:"대기", moving:"이동 중", processing:"처리 중", completed:"완료", idle:"유휴", reserved:"예약"};
   function panel(state, other, title, cursor) {
     const row = (value, previous, content) => `<tr class="${JSON.stringify(value) !== JSON.stringify(previous) ? "state-changed" : ""}">${content}</tr>`;
     return `<section class="allocation-state"><h3>${title} · 커서 ${cursor}</h3><h4>로트 위치 · 상태 · 배정 목적지</h4><table><thead><tr><th>로트</th><th>위치</th><th>상태</th><th>목적지</th></tr></thead><tbody>${Object.values(state.lots).map(l => row(l, other.lots[l.id], `<td>${esc(l.id)}</td><td>${esc(l.location)}</td><td>${labels[l.state]}</td><td>${esc(l.target || "미배정")}</td>`)).join("")}</tbody></table><h4>머신</h4><table><thead><tr><th>머신</th><th>상태</th><th>로트</th></tr></thead><tbody>${Object.entries(state.machines).map(([id,m]) => row(m, other.machines[id], `<td>${esc(id)}</td><td>${labels[m.state]}</td><td>${esc(m.lot || "—")}</td>`)).join("")}</tbody></table><h4>대기 목록 (준비 시각 · ID 순서)</h4><p>배정된 로트는 목적지 큐, 미배정 로트는 현재 위치에 표시합니다. 예약 로트는 머신에 표시합니다.</p><table><thead><tr><th>위치 / 목적지</th><th>개수</th><th>순서</th></tr></thead><tbody>${Object.entries(state.queues).map(([id,q]) => row(q, other.queues[id], `<td>${esc(id)}</td><td>${q.length}</td><td>${q.map(esc).join(" → ") || "—"}</td>`)).join("")}</tbody></table></section>`;
   }
-  $("#allocation-detail").innerHTML = `<h3>${esc(allocation?.id || "할당 없음")} · ${esc(allocation?.destination || "미선택 / 경로 없음")}</h3><p>선택 이유: ${esc(current.reason)} · 현재 재생 커서 ${S.cursor}</p><p>강조한 행은 전후 변경 항목입니다. 할당 후는 이동 시작 전입니다.</p><button id="allocation-before">할당 전으로 이동</button> <button id="allocation-after">할당 후로 이동</button><div class="allocation-pair">${panel(before, after, "할당 전", beforeCursor)}${panel(after, before, allocation ? "할당 후" : "선택 기록 후 · 할당 없음", afterCursor)}</div><h3>선택 후보 / 조건 제외</h3>${(current.candidates || []).map(c => `<div class="info-card ${c.id === current.chosen ? "selected" : ""}"><b>${c.id === current.chosen ? "선택" : "미선택 (개별 사유 미제공)"} · ${esc(c.lot_id)} / ${esc(c.route_id)}</b>${esc(c.from)} → ${esc(c.to)} · 우선순위 ${c.priority} · 대기 ${c.queue_length}</div>`).join("")}${(current.checks || []).filter(c => !c.eligible).map(c => `<div class="info-card rejected">조건 제외 · ${esc(c.lot_id)} / ${esc(c.route_id)} · ${esc(c.reason)}</div>`).join("")}`;
+  $("#allocation-detail").innerHTML = `<h3>${esc(allocation?.id || "할당 없음")} · ${esc(allocation?.destination || (current.outcome === "route_preference" ? "경로 선택 · 예약 전" : "미선택 / 경로 없음"))}</h3><p>선택 이유: ${esc(current.reason)} · 현재 재생 커서 ${S.cursor}</p><p>강조한 행은 전후 변경 항목입니다. 할당 후는 이동 시작 전입니다.</p><button id="allocation-before">할당 전으로 이동</button> <button id="allocation-after">할당 후로 이동</button><div class="allocation-pair">${panel(before, after, "할당 전", beforeCursor)}${panel(after, before, allocation ? "할당 후" : "선택 기록 후 · 할당 없음", afterCursor)}</div><h3>선택 후보 / 조건 제외</h3>${(current.candidates || []).map(c => `<div class="info-card ${c.id === current.chosen ? "selected" : ""}"><b>${c.id === current.chosen ? "선택" : "미선택 (개별 사유 미제공)"} · ${esc(c.lot_id)} / ${esc(c.route_id)}</b>${esc(c.from)} → ${esc(c.to)} · 우선순위 ${c.priority} · 대기 ${c.queue_length}</div>`).join("")}${(current.checks || []).filter(c => !c.eligible).map(c => `<div class="info-card rejected">조건 제외 · ${esc(c.lot_id)} / ${esc(c.route_id)} · ${esc(c.reason)}</div>`).join("")}`;
   $("#allocation-before").onclick = () => {pause(); seek(beforeCursor, true);};
   $("#allocation-after").onclick = () => {pause(); seek(afterCursor, true);};
 }
@@ -448,7 +449,7 @@ function seek(cursor, preserveComparison = false) {
   if (!preserveComparison) {
     const event = S.result?.events[S.cursor - 1];
     const allocation = S.result?.allocations?.find(a => a.id === event?.allocation_id);
-    S.comparison = allocation?.decision_index ?? S.result?.events.slice(0, S.cursor).findLast(e => ["decision", "blocked"].includes(e.kind))?.index;
+    S.comparison = event?.kind === "decision" || event?.kind === "blocked" ? event.index : allocation?.decision_index ?? S.result?.events.slice(0, S.cursor).findLast(e => ["decision", "blocked"].includes(e.kind))?.index;
   }
   renderPlayback();
   renderMetrics();

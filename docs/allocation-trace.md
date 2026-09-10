@@ -19,3 +19,5 @@ JSON 내보내기의 `allocations`는 다음 필드를 갖습니다.
 `choose_candidate`는 `(후보 ID, 이유)` 또는 `(None, 이유)`를 반환할 수 있습니다. `None`은 이번 선택 보류를 뜻하며 성공한 할당이나 이동을 만들지 않습니다. Pull은 다음 공장 상태 변경 때 다시 평가하고, Push는 해당 준비 단계에서 보류 상태로 남습니다. 경로가 없으면 `blocked`를 기록합니다. 미선택과 경로 없음은 전후 비교에 표시되지만 `allocations`에는 들어가지 않습니다. 조건 제외 사유와 함수의 선택 이유를 기록하며, 함수가 제공하지 않은 후보별 탈락 사유는 추측하지 않습니다.
 
 검증: `python -m unittest discover -s tests`, `python tests/browser_smoke.py`, `python tests/browser_allocations.py` (브라우저 검증은 Playwright/Chromium 필요).
+
+Pull에서 OUTPUT과 머신 경로가 함께 있으면 출발 단계의 선택 함수가 출고 여부와 선호 경로를 결정합니다. 머신 경로 선택은 `decision.outcome = "route_preference"`와 `route_preference` 이벤트로 기록하고 `preferred_route`에 보관하며, 아직 할당 ID나 목적지 배정을 생성하지 않습니다. 해당 머신이 후보를 선택하여 예약할 때 성공한 할당을 한 번 생성합니다. 머신이 보류하면 성공한 할당 없이 선호 경로에서 대기합니다. 모든 보류 결정은 `allocation_id = null`이며 비교 화면은 해당 결정 자체의 이유와 경계를 표시합니다.

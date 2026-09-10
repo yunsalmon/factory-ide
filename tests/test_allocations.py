@@ -13,7 +13,42 @@ def replay(result, cursor):
     return state
 
 
+def mixed_pull():
+    m = simple()
+    m['machines'].append(dict(id='N', name='N', process='P', line='A', time=3))
+    m['routes'][1]['priority'] = 9
+    m['routes'] += [dict(id='next', **{'from':'M', 'to':'N'}, priority=0, delay=1, product='*', enabled=True),
+                    dict(id='nout', **{'from':'N', 'to':'OUTPUT'}, priority=0, delay=1, product='*', enabled=True)]
+    return m
+
+
 class AllocationTests(unittest.TestCase):
+    def test_mixed_output_pull_allocates_once_at_reservation(self):
+        r = Factory(mixed_pull()).run()
+        next_allocations = [a for a in r['allocations'] if a['destination'] == 'N']
+        self.assertEqual(len(next_allocations), 1)
+        a = next_allocations[0]
+        self.assertEqual([e['kind'] for e in r['events'] if e['allocation_id'] == a['id']],
+                         ['decision', 'assigned', 'move', 'start', 'finish'])
+        self.assertEqual(replay(r, a['before_cursor'])['machines']['N']['state'], 'idle')
+        self.assertEqual(replay(r, a['after_cursor'])['machines']['N'], {'state':'reserved', 'lot':'LOT-001'})
+        preferences = [e for e in r['events'] if e.get('outcome') == 'route_preference']
+        self.assertEqual(len(preferences), 1)
+        self.assertIsNone(preferences[0]['allocation_id'])
+        self.assertEqual(r['summary']['completed'], 1)
+
+    def test_mixed_output_pull_decline_has_no_success_identity(self):
+        def choose(cs, ctx):
+            if ctx.get('machine', {}).get('id') == 'N':
+                return None, 'N declined'
+            return min(cs, key=lambda c: c['priority'])['id'], 'first choice'
+        r = Factory(mixed_pull(), choose).run()
+        declined = next(e for e in r['events'] if e.get('reason') == 'N declined')
+        self.assertIsNone(declined['allocation_id'])
+        self.assertIsNone(declined['chosen'])
+        self.assertFalse(any(a['destination'] == 'N' for a in r['allocations']))
+        self.assertEqual(replay(r, declined['index']), replay(r, declined['index'] + 1))
+
     def test_modes_boundaries_and_links(self):
         for mode in ['pull', 'push']:
             m = simple(); m['mode'] = mode; m['source']['count'] = 3

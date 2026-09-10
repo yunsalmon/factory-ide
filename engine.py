@@ -39,7 +39,7 @@ class Factory:
                 machines[mid] = value
         self.last_machines.update(copy.deepcopy(machines))
         self.events.append(copy.deepcopy(dict(index=len(self.events), time=self.env.now,
-            kind=kind, lot=lot, allocation_id=lot.get('allocation_id'),
+            kind=kind, lot=lot, allocation_id=extra.pop('allocation_id', lot.get('allocation_id')),
             state_changes=dict(lots={lot['id']: lot}, machines=machines), **extra)))
 
     def wake(self):
@@ -56,6 +56,8 @@ class Factory:
                 reason = '비활성 경로'
             elif r['product'] not in ('*', lot['product']):
                 reason = f"제품 조건 불일치 ({r['product']})"
+            elif lot.get('preferred_route') and lot['preferred_route'] != r['id']:
+                reason = f"Pull에서 {lot['preferred_route']} 경로를 선택함"
             elif lot.get('target') and lot['target'] != r['to']:
                 reason = f"Push에서 {lot['target']}에 배정됨"
             checks.append(dict(route_id=r['id'], lot_id=lot['id'], to=r['to'], eligible=reason is None, reason=reason or '선택 가능'))
@@ -76,17 +78,24 @@ class Factory:
                                queue_length=sum(l['state'] != 'completed' and l.get('target') == r['to'] for l in self.lots.values()) + int(bool(self.busy.get(r['to'])))))
         return result, checks
 
-    def decide(self, candidates, checks, context, lot=None):
+    def decide(self, candidates, checks, context, lot=None, output_choice=False):
         selected, reason = self.choose(copy.deepcopy(candidates), dict(context, now=self.env.now, mode=self.model['mode'], rng=self.rng))
         chosen = next((c for c in candidates if c['id'] == selected), None)
         if (selected is not None and chosen is None) or not isinstance(reason, str) or not reason.strip():
             raise ModelError('choose_candidate는 전달받은 후보 id와 비어 있지 않은 이유를 반환해야 합니다.')
         lot = lot or self.lots[(chosen or candidates[0])['lot_id']]
-        allocation_id = f'ALLOC-{len(self.allocations) + 1:06d}' if chosen else None
+        preference = bool(output_choice and chosen and chosen['to'] != 'OUTPUT')
+        allocation_id = f'ALLOC-{len(self.allocations) + 1:06d}' if chosen and not preference else None
         self.emit('decision', lot, chosen=chosen['id'] if chosen else None, candidates=candidates, checks=checks,
                   reason=reason, machine=context.get('machine', {}).get('id'), route=chosen['route_id'] if chosen else None,
-                  decision_mode=self.model['mode'], proposed_allocation_id=allocation_id)
+                  decision_mode=self.model['mode'], allocation_id=allocation_id,
+                  outcome='route_preference' if preference else 'selected' if chosen else 'declined')
         if not chosen:
+            return None, lot
+        if preference:
+            lot['preferred_route'] = chosen['route_id']
+            self.emit('route_preference', lot, allocation_id=None, route=chosen['route_id'],
+                      reason='경로 선택 완료 · 목적지 머신의 선택과 예약 대기')
             return None, lot
         self.allocations.append(dict(id=allocation_id, lot_id=lot['id'], destination=chosen['to'],
             route_id=chosen['route_id'], mode=self.model['mode'], decision_index=len(self.events) - 1,
@@ -105,13 +114,14 @@ class Factory:
         self.allocations[-1]['after_cursor'] = len(self.events)
 
     def ready(self, lot):
-        lot.update(state='waiting', ready_since=self.env.now, target=None, route=None, assigned_route=None, allocation_id=None)
+        lot.update(state='waiting', ready_since=self.env.now, target=None, route=None, assigned_route=None, allocation_id=None, preferred_route=None)
         self.emit('ready', lot)
         candidates, checks = self.candidates(lot)
         if not candidates:
             self.emit('blocked', lot, checks=checks, reason='선택 가능한 출고 경로가 없습니다.')
         elif self.model['mode'] == 'push' or any(c['to'] == 'OUTPUT' for c in candidates):
-            route, _ = self.decide(candidates, checks, {'lot': copy.deepcopy(lot)}, lot)
+            route, _ = self.decide(candidates, checks, {'lot': copy.deepcopy(lot)}, lot,
+                                   output_choice=self.model['mode'] == 'pull')
             if route is None:
                 self.wake()
                 return
