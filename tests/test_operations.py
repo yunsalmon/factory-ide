@@ -172,6 +172,37 @@ class OperationRuntimeTests(unittest.TestCase):
         self.assertIn('LOT-002', diagnostic['lots'])
         self.assert_all_cursors(result)
 
+    def test_deferred_selection_without_future_events_is_diagnosed(self):
+        factory = Factory(simple(), choose=lambda candidates, context: (None, 'defer'))
+        result = factory.run()
+        self.assertEqual(factory.env.peek(), float('inf'))
+        self.assertEqual(result['allocations'], [])
+        self.assertEqual(factory.operations['M']['state'], 'idle')
+        diagnostic = next(d for d in result['operational_diagnostics'] if d['code'] == 'no_progress')
+        self.assertEqual(diagnostic['cause'], 'selection_declined')
+        self.assertEqual(diagnostic['machine'], 'M')
+        self.assertEqual(diagnostic['machines'], ['M'])
+        self.assertEqual(diagnostic['buffers'], ['BUF_INPUT'])
+        self.assertEqual(diagnostic['lots'], ['LOT-001'])
+        self.assert_all_cursors(result)
+
+    def test_full_buffer_at_horizon_with_processing_consumer_is_not_deadlock(self):
+        m = simple(); m['duration'] = 4; m['source'].update(count=3, interval=.1)
+        m['machines'][0]['time'] = 20
+        m['buffers'] = [dict(id='IN', at='INPUT', capacity=2, policy='fifo')]
+        factory = Factory(m); result = factory.run()
+        self.assertIsNone(factory.source_pending)
+        self.assertEqual(factory.operations['M']['state'], 'processing')
+        self.assertGreater(factory.env.peek(), m['duration'])
+        self.assertFalse(any(d['code'] in ('deadlock', 'no_progress') for d in result['operational_diagnostics']))
+        diagnostic = next(d for d in result['operational_diagnostics'] if d.get('cause') == 'buffer_full')
+        self.assertEqual(diagnostic['code'], 'horizon_wait')
+        self.assertEqual(diagnostic['machine'], 'M')
+        self.assertEqual(diagnostic['buffers'], ['IN'])
+        self.assertEqual(diagnostic['lots'], ['LOT-002', 'LOT-003'])
+        self.assertEqual(diagnostic['occupancy'], diagnostic['capacity'])
+        self.assert_all_cursors(result)
+
     def test_adjacent_calendar_boundaries_and_terminal_capacity(self):
         m = simple(); m['source'].update(count=3, interval=.01)
         m['routes'][0]['delay'] = 0; m['routes'][1]['delay'] = 0

@@ -403,6 +403,23 @@ class Factory:
             if lot['state'] == 'blocked' and lot['placement']['kind'] == 'transport':
                 diagnostics.append(dict(code='deadlock' if halted else 'horizon_wait', machine=None,
                     buffers=[self.buffer_at['OUTPUT']], lots=[lot['id']], cause='output_storage_full'))
+        # Inventory can be stalled even when its consumer is idle (policy
+        # decline), or congested while the consumer is still processing.
+        for bid, buffer in self.buffers.items():
+            waiting = [lid for lid in buffer['contents'] if self.lots[lid]['state'] == 'waiting']
+            full = buffer['capacity'] is not None and len(buffer['contents']) >= buffer['capacity']
+            if not full and not (halted and waiting):
+                continue
+            consumers = sorted(mid for mid in buffer['downstream'] if mid in self.machines)
+            involved = sorted(set(consumers) | {mid for mid in buffer['upstream'] if mid in self.machines})
+            declined = any(self.operations[mid]['cause'] == 'selection_declined' for mid in consumers)
+            diagnostics.append(dict(
+                code=('deadlock' if halted else 'horizon_wait') if full else 'no_progress',
+                machine=consumers[0] if len(consumers) == 1 else None, machines=involved,
+                state='buffer_full' if full else 'waiting',
+                cause='buffer_full' if full else 'selection_declined' if declined else 'no_future_event',
+                buffers=[bid], lots=list(buffer['contents']) if full else waiting,
+                occupancy=len(buffer['contents']), capacity=buffer['capacity']))
         if self.source_pending:
             diagnostics.append(dict(code='source_backpressure', **self.source_pending))
         return diagnostics

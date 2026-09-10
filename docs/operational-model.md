@@ -55,7 +55,9 @@ The trace retains `schema_version: 2`, existing events/allocations and their ID 
 - `state_changes.lots`: every changed lot since the previous event, including placement changes made during machine-only transitions.
 - `machine_state` events with `transition.previous` (including `end` and `duration`) and `transition.current`.
 - `transport_arrive`, `buffer_enter` and `buffer_wait` events.
-- `operational_diagnostics`: structured `deadlock`, `horizon_wait`, or `source_backpressure` findings containing involved machine, buffer and lot IDs where applicable.
+- `operational_diagnostics`: structured `deadlock`, `horizon_wait`, `no_progress`, or `source_backpressure` findings containing involved machine, buffer and lot IDs where applicable.
+
+Diagnosis also checks inventory independently of the machine's operational state. A full finite buffer at the horizon records its occupancy, capacity, queued lots and consuming machine(s), even while processing is still scheduled to finish. It is `horizon_wait` when future events remain, not deadlock. A halted waiting queue without future events is `no_progress`; an idle consumer that declined selection is identified with cause `selection_declined`. Buffer diagnostics include `machines` for all related producers/consumers and retain the singular `machine` field when there is one consumer.
 
 The operational machine states are `idle`, `reserved`, `processing`, `setup`, `down`, `blocked`, `starved`, and `offshift`. Starvation means an available machine has no eligible input; it ends when an eligible lot can be reserved. A deliberate chooser decline leaves the available machine idle with cause `selection_declined`. Calendar states override the underlying work stage. No operational record reports processing during setup/down/offshift. The next transition closes the preceding interval; the final `since` interval remains open at the run horizon.
 
