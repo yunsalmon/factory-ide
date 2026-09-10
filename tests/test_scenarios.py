@@ -30,6 +30,10 @@ class ScenarioTests(unittest.TestCase):
   for row in v['evidence']:
    for side,snap in [('baseline',a),('candidate',b)]:
     if row[side]:self.assertEqual(snap['result']['events'][row[side]['index']]['time'],row[side]['data']['time'])
+ def test_source_change_does_not_claim_runtime_change(self):
+  r=Factory(ordered_model()).run()
+  comparison=self.page.evaluate('async r=>{const make=async source=>{const result=structuredClone(r);result.execution={kind:"browser",runtime:{python:"3.12.7",simpy:"4.1.1"},source_sha256:await scenarioHash(source,true)};return scenarioCreate(source,"",source,result)};return scenarioCompare(await make("baseline"),await make("candidate"));}',r)
+  self.assertNotIn('sc_runtime_warning',comparison['warnings'])
  def test_finite_output_capacity_and_cross_line_change(self):
   from test_operations import line
   m=line();m['machines'][1]['line']='B';a=self.snapshot(m)

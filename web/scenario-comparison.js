@@ -23,7 +23,7 @@ async function scenarioCreate(name,notes,source,result,runtime){
   const contract=scenarioContract(result),snapshot=JSON.parse(JSON.stringify(result));
   const source_hash=await scenarioHash(source,true),model_hash=await scenarioHash(snapshot.model);
   if(snapshot.execution?.source_sha256&&snapshot.execution.source_sha256!==source_hash)scenarioFail('sc_source_changed');
-  return {name:name.trim(),notes,source,source_hash,model_hash,trace_hash:await scenarioHash(snapshot),seed:snapshot.model.seed??null,runtime:JSON.parse(JSON.stringify(runtime??snapshot.execution??{kind:'unknown'})),contract,result:snapshot};
+  return {name:name.trim(),notes,source,source_hash,model_hash,trace_hash:await scenarioHash(snapshot),seed:snapshot.model.seed??null,runtime:JSON.parse(JSON.stringify(runtime??(snapshot.execution?{kind:snapshot.execution.kind,source_revision:snapshot.execution.source_revision??null,runtime:snapshot.execution.runtime??null}:{kind:'unknown'}))),contract,result:snapshot};
 }
 async function scenarioRestore(doc){
   if(doc?.format!==SCENARIO_FORMAT||doc.version!==1||!Array.isArray(doc.scenarios)||!doc.scenarios.length||doc.scenarios.length>10)scenarioFail('sc_invalid');
