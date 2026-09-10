@@ -334,7 +334,14 @@
     "lot_id": "로트 ID",
     "routing_rule": "이동 규칙",
     "run_complete": "SimPy 실행 완료 · {0}개 이벤트 · 재생 중",
-    "unallocated_location": "{0} · 미할당 · 선택 기록 없음 · 공정도 위치 표시"
+    "unallocated_location": "{0} · 미할당 · 선택 기록 없음 · 공정도 위치 표시",
+    "public_title": "공개 체험",
+    "public_scope": "사전 계산된 예제의 공정도·재생·선택 이유·할당 결과를 탐색합니다. Python 편집과 실행은 로컬 설치에서 가능합니다.",
+    "public_install": "로컬 설치 및 실행 안내",
+    "public_ready": "예제 기록 준비됨",
+    "public_source": "예제 소스 (읽기 전용)",
+    "public_trace": "버전이 고정된 기록",
+    "public_help": "아래 재생 버튼과 타임라인으로 탐색하고 이벤트 또는 전체 할당 결과를 선택하세요."
   },
   "en": {
     "ui_1": "Arrival",
@@ -671,7 +678,14 @@
     "lot_id": "LOT ID",
     "routing_rule": "ROUTING RULE",
     "run_complete": "SimPy complete · {0} events · playing",
-    "unallocated_location": "{0} · unassigned · no decision record · showing diagram location"
+    "unallocated_location": "{0} · unassigned · no decision record · showing diagram location",
+    "public_title": "Public demo",
+    "public_scope": "Explore a precomputed example: process graph, replay, selection reasons and allocation results. Install locally to edit and execute Python.",
+    "public_install": "Local installation and execution guide",
+    "public_ready": "Example trace ready",
+    "public_source": "Example source (read only)",
+    "public_trace": "Versioned recording",
+    "public_help": "Use playback controls and the timeline below, then select an event or the full allocation results."
   },
   "ja": {
     "ui_1": "投入",
@@ -1008,6 +1022,13 @@
     "lot_id": "ロットID",
     "routing_rule": "移動ルール",
     "run_complete": "SimPy実行完了・{0}イベント・再生中",
-    "unallocated_location": "{0}・未割当・選択記録なし・工程図に位置を表示"
+    "unallocated_location": "{0}・未割当・選択記録なし・工程図に位置を表示",
+    "public_title": "公開デモ",
+    "public_scope": "事前計算された例の工程図・再生・選択理由・割当結果を確認できます。Python の編集と実行にはローカル環境へのインストールが必要です。",
+    "public_install": "ローカルでのインストールと実行",
+    "public_ready": "サンプル記録の準備完了",
+    "public_source": "サンプルソース（読み取り専用）",
+    "public_trace": "バージョン固定の記録",
+    "public_help": "下の再生ボタンとタイムラインで移動し、イベントまたは全割当結果を選択してください。"
   }
 }

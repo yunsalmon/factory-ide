@@ -1,0 +1,14 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Factory Studio · Local installation</title><style>body{font:18px/1.6 system-ui;max-width:850px;margin:3rem auto;padding:1rem}pre{overflow:auto;padding:1rem;background:#eef2f0}a{color:#246947}</style><a href="/">← Factory Studio</a><h1>Local installation · 로컬 설치 · ローカルインストール</h1>
+<section lang="ko"><h2>한국어</h2><p>공개 데모는 미리 계산된 기록만 제공합니다. Python 3.10 이상과 Git을 설치한 컴퓨터에서 아래 명령을 실행하세요. 브라우저로 http://127.0.0.1:8765 를 열면 코드를 편집하고 실행할 수 있습니다. 실행한 Python은 컴퓨터의 사용자 권한으로 동작하므로 신뢰하는 파일만 실행하세요.</p></section>
+<section lang="en"><h2>English</h2><p>The public demo provides precomputed recordings. On a computer with Python 3.10+ and Git, run the commands below and open http://127.0.0.1:8765 to edit and execute code. Python runs with your account's permissions; only execute trusted files.</p></section>
+<section lang="ja"><h2>日本語</h2><p>公開デモは事前計算された記録を提供します。Python 3.10 以上と Git を導入したコンピューターで以下を実行し、http://127.0.0.1:8765 を開くとコードを編集・実行できます。Python はユーザー権限で動作するため、信頼できるファイルのみ実行してください。</p></section>
+<h2>macOS / Linux</h2><pre>git clone https://github.com/yunsalmon/factory-ide.git
+cd factory-ide
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+python server.py --host 127.0.0.1 --port 8765</pre><h2>Windows PowerShell</h2><pre>git clone https://github.com/yunsalmon/factory-ide.git
+cd factory-ide
+py -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python server.py --host 127.0.0.1 --port 8765</pre><p><a href="https://github.com/yunsalmon/factory-ide#readme">README</a></p></html>

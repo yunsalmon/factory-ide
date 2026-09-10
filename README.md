@@ -155,3 +155,11 @@ tests/            엔진·API·브라우저 검증
 ```
 
 편집·실행·시각화 작업 흐름은 [Jaspera](https://github.com/JVMLand/Jaspera)에서 영감을 받았습니다. [FactorySimPy](https://github.com/FactorySimPy/FactorySimPy)는 제조 시스템 모델링의 참고 자료로 검토했으며, 이 프로젝트는 **SimPy를 직접 사용한 별도 엔진**입니다. 두 프로젝트의 코드를 복사하거나 런타임 의존성으로 포함하지 않습니다. 번들 라이선스는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하세요.
+
+## Public example replay
+
+A static public demo can replay a versioned example without exposing Python execution.
+It supports Korean, English and Japanese, selection reasons, allocation comparisons and full results.
+See [public demo deployment and recovery](docs/public-demo.md) for isolated build/testing,
+container operation and the proposed `factory.yshnote.com` ingress plan. This repository
+change alone does not establish that the external HTTPS deployment is live or accepted.

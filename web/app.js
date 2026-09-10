@@ -1,4 +1,5 @@
 "use strict";
+const PUBLIC_DEMO = document.documentElement.dataset.mode === "public";
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const esc = (s) =>
@@ -53,6 +54,7 @@ const kinds = {
   get blocked() { return tr("ui_10"); },
 };
 async function api(path, body) {
+  if (PUBLIC_DEMO) throw new Error(tr("public_scope"));
   const res = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
     headers: { "Content-Type": "application/json", "X-Factory-Token": S.token },
@@ -148,6 +150,7 @@ function invalidateTrace() {
   renderGraph();
 }
 async function applyCode(silent = false) {
+  if (PUBLIC_DEMO) return toast({code: "public_scope"});
   clearTimeout(parseTimer);
   const revision = S.revision,
     source = S.source;
@@ -567,6 +570,7 @@ function locate(id) {
   updateEditor();
 }
 function inspectMachine(id, newMachine = false) {
+  if (PUBLIC_DEMO) return toast({code: "public_scope"});
   const m = newMachine
     ? { id, name: tr("ui_84"), process: S.model.processes[0].id, line: "A", time: 5 }
     : S.model.machines.find((m) => m.id === id);
@@ -618,6 +622,7 @@ function inspectMachine(id, newMachine = false) {
   renderGraph();
 }
 function inspectRoute(id, newRoute = false) {
+  if (PUBLIC_DEMO) return toast({code: "public_scope"});
   const r = newRoute
     ? {
         id,
@@ -670,6 +675,7 @@ function inspectRoute(id, newRoute = false) {
   renderGraph();
 }
 function inspectProcess(id, newProcess = false) {
+  if (PUBLIC_DEMO) return toast({code: "public_scope"});
   const p = newProcess ? { id, name: tr("ui_105") } : S.model.processes.find((p) => p.id === id);
   S.selected = { type: "process", id };
   openInspector(
@@ -698,6 +704,7 @@ function inspectProcess(id, newProcess = false) {
     };
 }
 function inspectSettings() {
+  if (PUBLIC_DEMO) return toast({code: "public_scope"});
   const m = S.model;
   if (!m) return;
   S.selected = { type: "settings" };
@@ -785,6 +792,7 @@ function inspectLot(id, refresh = true) {
   }
 }
 async function run() {
+  if (PUBLIC_DEMO) return toast({code: "public_scope"});
   if (S.job) {
     await cancelRun();
     return;
@@ -1072,6 +1080,22 @@ if (window.CodeMirror) {
 }
 async function boot() {
   try {
+    if (PUBLIC_DEMO) {
+      const response = await fetch("/demo.json");
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      S.source = S.example = data.source;
+      setSource(data.source);
+      editor?.setOption("readOnly", true);
+      $("#code").readOnly = true;
+      S.model = data.result.model; S.result = data.result; S.valid = true;
+      S.warnings = data.result.warnings; S.warningMessages = data.result.warning_messages;
+      $("#demo-version").textContent = `${data.version.source_revision} · trace v${data.result.schema_version} · ${data.version.trace_sha256}`;
+      $("#project-name").textContent = S.model.name;
+      diagnostics(); renderTree(); renderGraph(); seek(1); selectTab("events");
+      status({code: "public_ready"});
+      return;
+    }
     const data = await api("/api/bootstrap");
     S.token = data.token;
     S.example = data.source;
@@ -1174,6 +1198,7 @@ function renderAllocationResults() {
 }
 
 function persistReplay() {
+  if (PUBLIC_DEMO) return;
   try {
     if (S.result) localStorage.setItem("factory-studio.replay.v1", JSON.stringify({source: S.source, result: S.result, cursor: S.cursor, tab: S.tab, resultsFinal: S.resultsFinal, filters: S.resultFilters}));
     else localStorage.removeItem("factory-studio.replay.v1");

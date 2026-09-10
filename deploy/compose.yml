@@ -1,0 +1,22 @@
+services:
+  factory-demo:
+    image: factory-demo:${FACTORY_REVISION:?Set full verified commit SHA}
+    container_name: factory-demo
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports:
+      - "127.0.0.1:${FACTORY_PORT:-3084}:8080"
+    networks: [factory-public]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  factory-public:
+    external: true
+    name: factory-public
