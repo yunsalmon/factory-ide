@@ -103,6 +103,17 @@ class BrowserPythonRuntime {
     }
   }
 
+  async runSeed(source, seed) {
+    await this.ensureReady();
+    this.setState("running");
+    try {
+      const message = await this.request("run_seed", {source, seed});
+      return message.payload;
+    } finally {
+      if (this.worker) this.setState("ready");
+    }
+  }
+
   stop() {
     if (!this.worker) return false;
     this.terminate(Object.assign(new Error("Browser runtime stopped"), {code: "browser_stopped"}));

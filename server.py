@@ -68,7 +68,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
+        policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+        if urlparse(self.path).path == "/browser-worker.js":
+            policy = "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self'; object-src 'none'; base-uri 'none'"
+        self.send_header('Content-Security-Policy', policy)
         self.end_headers()
         try:
             self.wfile.write(data)
@@ -101,6 +104,15 @@ class Handler(BaseHTTPRequestHandler):
         assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/i18n.js': ('i18n.js', 'text/javascript'), '/allocation-results.js': ('allocation-results.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         assets.update({f'/{name}': (name, 'text/javascript') for name in ('inventory-projection.js', 'inventory-ui.js', 'scenario-comparison.js', 'scenario-ui.js')})
         assets.update({f'/{name}': (name, 'text/javascript') for name in ('order-projection.js', 'order-ui.js')})
+        assets.update({f'/{name}': (name, 'text/javascript') for name in ('browser-runtime.js','browser-worker.js','experiment-core.js','experiment-ui.js')})
+        if path.startswith('/runtime/') and path.removeprefix('/runtime/') in ('engine.py','model.py','messages.py','orders.py','disruptions.py','operation_metrics.py'):
+            return self.send(200, (ROOT / path.removeprefix('/runtime/')).read_bytes(), 'text/plain; charset=utf-8')
+        if path.startswith('/vendor/pyodide/'):
+            name = path.removeprefix('/vendor/pyodide/')
+            target = ROOT / '.cache/browser-runtime' / name
+            if '/' not in name and name in ('pyodide.js','pyodide.asm.js','pyodide.asm.wasm','python_stdlib.zip','pyodide-lock.json','simpy-4.1.1-py3-none-any.whl') and target.is_file():
+                return self.send(200, target.read_bytes(), 'application/wasm' if name.endswith('.wasm') else 'text/javascript' if name.endswith('.js') else 'application/octet-stream')
+        assets['/locales.json'] = ('locales.json', 'application/json')
         assets['/operations.js'] = ('operations.js', 'text/javascript')
         assets.update({f'/{name}': (name, 'text/javascript') for name in ('order-projection.js', 'order-ui.js', 'data-core.js', 'data-ui.js', 'data-worker.js')})
         if path.startswith('/vendor/codemirror/'):
