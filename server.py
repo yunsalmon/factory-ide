@@ -1,5 +1,7 @@
 """Local-only HTTP application. No build step or external frontend CDN."""
 from messages import message, descriptor
+import platform
+import simpy
 import argparse
 import ipaddress
 import json
@@ -88,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
             catalogue = (ROOT / 'web/locales.json').read_text()
             return self.send(200, ('const translations = ' + catalogue + ';').encode(), 'text/javascript; charset=utf-8')
         if path == '/api/bootstrap':
-            return self.send(200, {'token': TOKEN, 'source': (ROOT / 'examples/demo.py').read_text(), 'version': '1.0.0'})
+            return self.send(200, {'token': TOKEN, 'source': (ROOT / 'examples/demo.py').read_text(), 'version': '1.0.0', 'runtime': {'kind': 'local', 'application': '1.0.0', 'runtime': {'python': platform.python_version(), 'simpy': simpy.__version__}}})
         if path.startswith('/api/jobs/'):
             if self.headers.get('X-Factory-Token') != TOKEN:
                 return self.send(403, {'error': message('message_41')})
@@ -97,7 +99,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = {k: v for k, v in job.items() if k in ('status', 'payload')} if job else None
             return self.send(200 if result else 404, result or {'error': message('message_42')})
         assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/i18n.js': ('i18n.js', 'text/javascript'), '/allocation-results.js': ('allocation-results.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
-        assets.update({f'/{name}': (name, 'text/javascript') for name in ('inventory-projection.js', 'inventory-ui.js')})
+        assets.update({f'/{name}': (name, 'text/javascript') for name in ('inventory-projection.js', 'inventory-ui.js', 'scenario-comparison.js', 'scenario-ui.js')})
         assets.update({f'/{name}': (name, 'text/javascript') for name in ('order-projection.js', 'order-ui.js')})
         assets['/operations.js'] = ('operations.js', 'text/javascript')
         if path.startswith('/vendor/codemirror/'):

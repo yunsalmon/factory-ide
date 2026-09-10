@@ -179,3 +179,5 @@ business priority and due-date tracking without changing legacy generated supply
 Try `examples/orders_demo.py`; use the tab's JSON plan editor/import/export and filtered CSV.
 See [order schema, replay metrics and dispatch contract](docs/orders.md) for time/date
 semantics, finite INPUT admission, localized validation and tests.
+
+Planner scenario comparison: run and save named snapshots, compare signed final-horizon KPIs, inspect paired trace evidence, and export/restore without rerunning. See [scenario contract and metric definitions](docs/scenario-comparison.md).
