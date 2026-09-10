@@ -1,4 +1,5 @@
 import copy
+import json
 import unittest
 from engine import Factory
 from model import ModelError, validate
@@ -125,6 +126,20 @@ class DisruptionTests(unittest.TestCase):
             yield env.timeout(1)
         result=Factory(m,process=custom).run()
         self.assertEqual(result['summary']['mean_cycle_time'],4)
+
+    def test_reserved_looking_family_names_preserve_serialized_setup(self):
+        for origin, target in [('constructor', '__proto__'), ('__proto__', 'constructor')]:
+            with self.subTest(origin=origin, target=target):
+                m=simple();m['source']['products']=[target]
+                m['product_families']={target:target}
+                m['machines'][0].update(initial_family=origin, setup_matrix={origin:{target:2}})
+                validate(m)
+                restored=json.loads(json.dumps(m))
+                self.assertEqual(restored,m)
+                result=Factory(restored).run()
+                self.assertEqual(result['operation_metrics']['machines']['M']['setup'],2)
+                plan=next(e for e in result['events'] if e['kind']=='setup_plan')
+                self.assertEqual((plan['previous_family'],plan['family']), (origin,target))
 
     def test_invalid_resource_and_failure_definitions(self):
         for mutate in [lambda m:m['resources'][0].update(capacity=0),
