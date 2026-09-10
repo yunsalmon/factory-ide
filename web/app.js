@@ -1178,14 +1178,16 @@ async function boot() {
       $("#demo-version").textContent = `${data.version.source_revision} · trace v${data.result.schema_version} · Pyodide ${runtime.pyodide} · Python ${runtime.python} · SimPy ${runtime.simpy} · ${data.version.trace_sha256}`;
       if (source !== data.source) {
         await applyCode(true);
-        try {
-          const saved = JSON.parse(localStorage.getItem("factory-studio.public.replay.v1"));
-          if (saved?.source === source && saved.result?.schema_version === 2) {
-            S.result = saved.result; S.cursor = saved.cursor; S.tab = saved.tab || "events";
-            S.resultsFinal = saved.resultsFinal || false; S.resultFilters = saved.filters || {};
-          }
-        } catch {}
       }
+      try {
+        const saved = JSON.parse(localStorage.getItem("factory-studio.public.replay.v1"));
+        if (saved?.source === source && saved.result?.schema_version === 2) {
+          S.model = saved.result.model; S.result = saved.result; S.valid = true;
+          S.cursor = saved.cursor; S.tab = saved.tab || "events";
+          S.resultsFinal = saved.resultsFinal || false; S.resultFilters = saved.filters || {};
+          S.warnings = S.result.warnings; S.warningMessages = S.result.warning_messages || [];
+        }
+      } catch {}
       $("#project-name").textContent = S.model.name;
       diagnostics(); renderTree(); renderGraph(); seek(S.result ? Math.max(1, S.cursor) : 0); selectTab(S.result ? S.tab : "console");
       status({code: "public_ready"});

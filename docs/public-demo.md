@@ -2,7 +2,9 @@
 
 The proposed address is `https://factory.yshnote.com`; it is **not configured or accepted by this change**. Record the actual accepted URL, commit, image ID, trace hash, UTC time and external browser evidence in the release record after publication. Local container checks do not satisfy external HTTPS acceptance.
 
-The public artifact contains HTML/JS/CSS, checksum-pinned Pyodide 0.27.7 and SimPy 4.1.1, and a precomputed schema-v2 fallback. It never starts `server.py` or `worker.py`; Nginx rejects `/api/*` and its image has no native Python executable. Python runs in a dedicated browser Web Worker and returns the existing result contract. Stop or the eight-second limit destroys that worker, so the next run starts a fresh interpreter. File and JS/network imports are denied to user code, the worker has no DOM, and its virtual filesystem disappears with the worker. Reload restores matching browser-local source/results; **Reset to example** clears them and restores the fallback.
+The public artifact contains HTML/JS/CSS, checksum-pinned Pyodide 0.27.7 and SimPy 4.1.1, and a precomputed schema-v2 fallback. It never starts `server.py` or `worker.py`; Nginx rejects `/api/*` and its image has no native Python executable. Python runs in a dedicated browser Web Worker and returns the existing result contract. Stop or the eight-second limit destroys that worker, so the next run starts a fresh interpreter. Reload restores matching browser-local source/results; **Reset to example** clears them and restores the fallback.
+
+The import and `open()` allowlist guides code toward the supported model contract; it is not a security boundary inside the Python interpreter. Advanced Python can inspect the Pyodide virtual filesystem or JS bridge. That filesystem exists only in the disposable WebAssembly worker and is not the host/container filesystem. Host and network isolation comes from the dedicated Worker, absence of DOM/server credentials and native execution APIs, the static container, and its CSP (`connect-src 'self'`).
 
 ## Reproducible build and isolated validation
 

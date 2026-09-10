@@ -47,10 +47,10 @@ def _sandbox_import(name, globals=None, locals=None, fromlist=(), level=0):
     root = name.split(".", 1)[0]
     if level or root in _allowed_imports:
         return _original_import(name, globals, locals, fromlist, level)
-    raise PermissionError(f"Import '{root}' is unavailable in the public browser sandbox")
+    raise PermissionError(f"Import '{root}' is outside the supported public model modules")
 
 def _denied(*args, **kwargs):
-    raise PermissionError("Filesystem access is unavailable in the public browser sandbox")
+    raise PermissionError("open() is outside the supported public model contract")
 
 _safe_builtins = dict(vars(builtins))
 _safe_builtins.update({"__import__": _sandbox_import, "open": _denied, "input": _denied})
@@ -108,8 +108,9 @@ def _handle(operation, source):
     python: pyodide.runPython("platform.python_version()"),
     simpy: pyodide.runPython("simpy.__version__"),
   };
-  // User Python cannot reach browser network or messaging primitives through the js bridge.
-  self.fetch = () => Promise.reject(new TypeError("Network access is unavailable in the public browser sandbox"));
+  // These guards catch accidental use outside the model contract. The disposable
+  // Worker, document isolation and CSP are the host/network security boundaries.
+  self.fetch = () => Promise.reject(new TypeError("fetch() is outside the supported public model contract"));
   self.XMLHttpRequest = undefined;
   self.WebSocket = undefined;
   self.EventSource = undefined;
