@@ -34,7 +34,7 @@ class BrowserRuntimeTests(unittest.TestCase):
     def test_artifact_versions_and_hashes_are_frozen(self):
         self.assertEqual(runtime_fetch.PYODIDE_VERSION, '0.27.7')
         self.assertEqual(runtime_fetch.SIMPY_VERSION, '4.1.1')
-        self.assertEqual(len(runtime_fetch.ARTIFACTS), 6)
+        self.assertEqual(len(runtime_fetch.ARTIFACTS), 7)
         self.assertTrue(all(len(expected) == 64 for _, expected in runtime_fetch.ARTIFACTS.values()))
 
     def test_fetch_rejects_artifact_that_does_not_match_frozen_hash(self):

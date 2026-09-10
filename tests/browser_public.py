@@ -124,7 +124,7 @@ with sync_playwright() as playwright:
             assert all(event.get('duration') is None for event in process_result['events'] if event['kind'] == 'start')
 
             for probe, expected in [
-                (changed + "\nimport js\n", "Import 'js' is unavailable"),
+                (changed + "\nimport js\njs.fetch('https://untrusted.invalid/marker')\n", "Import 'js' is unavailable"),
                 (changed + "\nopen('/tmp/factory-public-executed', 'w').write('bad')\n", 'Filesystem access is unavailable'),
             ]:
                 edit(page, probe)
@@ -140,6 +140,13 @@ with sync_playwright() as playwright:
             page.locator('#run-button').click()
             wait_for(page, '!window.factoryStudio.getState().job')
             expect(page.locator('#status')).to_contain_text('중지')
+            assert page.evaluate('window.factoryStudio.getState().runtimeState') == 'stopped'
+            edit(page, changed + '\nwhile True:\n    pass\n')
+            wait_checked(page)
+            page.locator('#run-button').click()
+            wait_for(page, 'window.factoryStudio.getState().job')
+            wait_for(page, '!window.factoryStudio.getState().job', 12)
+            expect(page.locator('.console')).to_contain_text(page.evaluate("tr('public_timeout')"))
             assert page.evaluate('window.factoryStudio.getState().runtimeState') == 'stopped'
             edit(page, changed)
             wait_checked(page)
