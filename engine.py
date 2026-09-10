@@ -1,4 +1,5 @@
 """Deterministic SimPy factory runtime with auditable routing decisions."""
+from messages import message, descriptor
 import copy
 import random
 import simpy
@@ -26,11 +27,11 @@ class Factory:
     @staticmethod
     def default_choose(candidates, context):
         c = min(candidates, key=lambda c: (c['priority'], c['queue_length'], c['ready_since'], c['id']))
-        return c['id'], '경로 우선순위 → 목적지 대기 수 → FIFO'
+        return c['id'], message('message_25')
 
     def emit(self, kind, lot, **extra):
         if len(self.events) >= 50000:
-            raise ModelError('이벤트 한도(50,000)를 초과했습니다. 실행 시간이나 로트 수를 줄이세요.')
+            raise ModelError(message('message_26'))
         machines = {}
         for mid, lid in self.busy.items():
             state = 'processing' if lid and self.lots[lid]['state'] == 'processing' else 'reserved' if lid else 'idle'
@@ -38,6 +39,8 @@ class Factory:
             if self.last_machines.get(mid) != value:
                 machines[mid] = value
         self.last_machines.update(copy.deepcopy(machines))
+        if descriptor(extra.get('reason')):
+            extra['reason_message'] = descriptor(extra['reason'])
         self.events.append(copy.deepcopy(dict(index=len(self.events), time=self.env.now,
             kind=kind, lot=lot, allocation_id=extra.pop('allocation_id', lot.get('allocation_id')),
             state_changes=dict(lots={lot['id']: lot}, machines=machines), **extra)))
@@ -53,14 +56,14 @@ class Factory:
                 continue
             reason = None
             if not r['enabled']:
-                reason = '비활성 경로'
+                reason = message('message_27')
             elif r['product'] not in ('*', lot['product']):
-                reason = f"제품 조건 불일치 ({r['product']})"
+                reason = message('message_28' ,r['product'])
             elif lot.get('preferred_route') and lot['preferred_route'] != r['id']:
-                reason = f"Pull에서 {lot['preferred_route']} 경로를 선택함"
+                reason = message('message_29' ,lot['preferred_route'])
             elif lot.get('target') and lot['target'] != r['to']:
-                reason = f"Push에서 {lot['target']}에 배정됨"
-            checks.append(dict(route_id=r['id'], lot_id=lot['id'], to=r['to'], eligible=reason is None, reason=reason or '선택 가능'))
+                reason = message('message_30' ,lot['target'])
+            checks.append(dict(route_id=r['id'], lot_id=lot['id'], to=r['to'], eligible=reason is None, reason=reason or message('message_31'), reason_message=descriptor(reason or message('message_31'))))
         return checks
 
     def candidates(self, lot, target=None):
@@ -82,7 +85,7 @@ class Factory:
         selected, reason = self.choose(copy.deepcopy(candidates), dict(context, now=self.env.now, mode=self.model['mode'], rng=self.rng))
         chosen = next((c for c in candidates if c['id'] == selected), None)
         if (selected is not None and chosen is None) or not isinstance(reason, str) or not reason.strip():
-            raise ModelError('choose_candidate는 전달받은 후보 id와 비어 있지 않은 이유를 반환해야 합니다.')
+            raise ModelError(message('message_32'))
         lot = lot or self.lots[(chosen or candidates[0])['lot_id']]
         preference = bool(output_choice and chosen and chosen['to'] != 'OUTPUT')
         allocation_id = f'ALLOC-{len(self.allocations) + 1:06d}' if chosen and not preference else None
@@ -95,7 +98,7 @@ class Factory:
         if preference:
             lot['preferred_route'] = chosen['route_id']
             self.emit('route_preference', lot, allocation_id=None, route=chosen['route_id'],
-                      reason='경로 선택 완료 · 목적지 머신의 선택과 예약 대기')
+                      reason=message('message_33'))
             return None, lot
         self.allocations.append(dict(id=allocation_id, lot_id=lot['id'], destination=chosen['to'],
             route_id=chosen['route_id'], mode=self.model['mode'], decision_index=len(self.events) - 1,
@@ -118,7 +121,7 @@ class Factory:
         self.emit('ready', lot)
         candidates, checks = self.candidates(lot)
         if not candidates:
-            self.emit('blocked', lot, checks=checks, reason='선택 가능한 출고 경로가 없습니다.')
+            self.emit('blocked', lot, checks=checks, reason=message('message_34'))
         elif self.model['mode'] == 'push' or any(c['to'] == 'OUTPUT' for c in candidates):
             route, _ = self.decide(candidates, checks, {'lot': copy.deepcopy(lot)}, lot,
                                    output_choice=self.model['mode'] == 'pull')
@@ -182,7 +185,7 @@ class Factory:
             context = {'now': self.env.now, 'rng': self.rng, 'shared': self.shared}
             duration = None if self.custom_process else self.timing(copy.deepcopy(machine), copy.deepcopy(lot), context)
             if duration is not None:
-                number(duration, f'{mid} processing_time 반환값', .000001)
+                number(duration, message('message_35' ,mid), .000001)
             lot.update(state='processing', location=mid, target=mid)
             self.emit('start', lot, machine=mid, duration=duration)
             if self.custom_process:
@@ -203,8 +206,8 @@ class Factory:
         completed = [l for l in self.lots.values() if l['state'] == 'completed']
         warnings = validate(self.model)
         if len(completed) < len(self.lots):
-            warnings.append(f'{len(self.lots) - len(completed)}개 로트가 종료 시점에 미완료입니다. 대기·처리 중이거나 경로가 막혀 있을 수 있습니다.')
-        return dict(schema_version=2, allocations=self.allocations, events=self.events, model=self.model, warnings=warnings,
+            warnings.append(message('message_36' ,len(self.lots) - len(completed)))
+        return dict(schema_version=2, allocations=self.allocations, events=self.events, model=self.model, warnings=warnings, warning_messages=[descriptor(w) for w in warnings],
                     summary=dict(completed=len(completed), arrived=len(self.lots), horizon=self.model['duration'],
                                  mean_cycle_time=sum(l['completed'] - l['created'] for l in completed) / len(completed) if completed else 0))
 
@@ -214,5 +217,5 @@ def execute(source):
     namespace = {'__name__': '__factory_model__'}
     exec(compile(source, 'factory_model.py', 'exec'), namespace)
     if namespace.get('MODEL') != model:
-        raise ModelError('실행 중 MODEL 변경은 지원하지 않습니다. 선언부 또는 편집 화면에서 수정하세요.')
+        raise ModelError(message('message_37'))
     return Factory(model, namespace.get('choose_candidate'), namespace.get('processing_time'), namespace.get('process_lot')).run()

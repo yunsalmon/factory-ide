@@ -15,7 +15,7 @@ atexit.register(server.terminate)
 base = server.stdout.readline().strip().split(' → ')[-1]
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
-    page = browser.new_page(viewport={'width': 1440, 'height': 1000})
+    page = browser.new_page(locale="ko-KR", viewport={'width': 1440, 'height': 1000})
     errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.goto(base)

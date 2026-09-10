@@ -7,7 +7,7 @@ const esc = (s) =>
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
   );
 const copy = (v) => JSON.parse(JSON.stringify(v));
-const fmt = (n) => Number(n || 0).toFixed(1);
+const fmt = (n) => new Intl.NumberFormat(locale, {minimumFractionDigits: 1, maximumFractionDigits: 1}).format(Number(n || 0));
 const S = {
   token: "",
   source: "",
@@ -26,6 +26,9 @@ const S = {
   zoom: 1,
   warnings: [],
   console: "",
+  runtimeError: null,
+  statusMessage: null,
+  toastMessage: null,
   example: "",
   busy: false,
 };
@@ -38,16 +41,16 @@ let parseTimer,
   settingEditor = false,
   errorLine = null;
 const kinds = {
-  arrival: "투입",
-  ready: "대기",
-  decision: "로트 선택",
-  assigned: "목적지 배정",
-  route_preference: "경로 선택 · 예약 대기",
-  move: "이동",
-  start: "처리 시작",
-  finish: "처리 종료",
-  complete: "완료",
-  blocked: "경로 없음",
+  get arrival() { return tr("ui_1"); },
+  get ready() { return tr("ui_2"); },
+  get decision() { return tr("ui_3"); },
+  get assigned() { return tr("ui_4"); },
+  get route_preference() { return tr("ui_5"); },
+  get move() { return tr("ui_6"); },
+  get start() { return tr("ui_7"); },
+  get finish() { return tr("ui_8"); },
+  get complete() { return tr("ui_9"); },
+  get blocked() { return tr("ui_10"); },
 };
 async function api(path, body) {
   const res = await fetch(path, {
@@ -56,31 +59,37 @@ async function api(path, body) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(localized(data.error, data.error_message) || `HTTP ${res.status}`), {detail: data.error_message});
   return data;
 }
+function displayMessage(message) {
+  return message?.code ? tr(message.code, message.args) : message || "";
+}
 function toast(message) {
+  S.toastMessage = message;
   clearTimeout(toastTimer);
-  $("#toast").textContent = message;
+  $("#toast").textContent = displayMessage(message);
   $("#toast").hidden = false;
   toastTimer = setTimeout(() => ($("#toast").hidden = true), 3500);
 }
 function status(message) {
-  $("#status").textContent = message;
+  S.statusMessage = message;
+  $("#status").textContent = displayMessage(message);
 }
 function diagnostics(error = "") {
+  if (!error) S.parseErrorDetail = null;
   $("#sync-status").textContent = error
-    ? "● 코드 오류 · 마지막 유효 공정도 표시"
-    : "● 코드 ↔ 공정도 동기화";
+    ? tr("ui_11")
+    : tr("ui_12");
   $("#sync-status").className = error ? "error" : "good";
   S.parseError = error;
   if (editor && errorLine !== null) {
     editor.removeLineClass(errorLine, "background", "code-error-line");
     errorLine = null;
   }
-  const line = error.match(/^(\d+)행:/);
-  if (editor && line) {
-    errorLine = Number(line[1]) - 1;
+  const line = S.parseErrorDetail?.code === "message_22" ? Number(S.parseErrorDetail.args[0]) : null;
+  if (editor && Number.isInteger(line) && line > 0) {
+    errorLine = line - 1;
     editor.addLineClass(errorLine, "background", "code-error-line");
   }
   $("#diagnostic-count").textContent = (error ? 1 : 0) + S.warnings.length || "";
@@ -90,7 +99,7 @@ function persist() {
   try {
     localStorage.setItem("factory-studio.source.v1", S.source);
   } catch {
-    status("브라우저 자동 저장 불가 · Python 파일로 저장하세요.");
+    status({code: "ui_13"});
   }
 }
 function setSource(source) {
@@ -147,31 +156,33 @@ async function applyCode(silent = false) {
     if (revision !== S.revision) return false;
     S.model = data.model;
     S.warnings = data.warnings;
+    S.warningMessages = data.warning_messages || [];
     S.valid = true;
     diagnostics();
     renderTree();
     renderGraph();
-    $("#project-name").textContent = S.model.name || "공장 프로젝트";
+    $("#project-name").textContent = S.model.name || tr("ui_14");
     $("#mode-label").textContent =
-      S.model.mode === "pull" ? "PULL · 후공정 선택" : "PUSH · 전공정 배정";
-    if (!silent) status("코드와 공정도를 동기화했습니다.");
+      S.model.mode === "pull" ? tr("ui_15") : tr("ui_16");
+    if (!silent) status({code: "ui_17"});
     return true;
   } catch (e) {
     if (revision !== S.revision) return false;
     S.valid = false;
+    S.parseErrorDetail = e.detail;
     diagnostics(e.message);
-    status("코드를 확인하세요. 콘솔 / 진단에서 오류를 볼 수 있습니다.");
+    status({code: "ui_18"});
     if (!silent) {
       selectTab("console");
-      toast(e.message);
+      toast(e.detail || e.message);
     }
     return false;
   }
 }
 async function mutate(change) {
-  if (S.busy || S.job) throw new Error("실행 또는 동기화가 끝난 뒤 수정하세요.");
+  if (S.busy || S.job) throw new Error(tr("ui_19"));
   if (!(await applyCode(true)))
-    throw new Error("코드 오류를 먼저 수정하세요. 마지막 유효 모델로 덮어쓰지 않습니다.");
+    throw new Error(tr("ui_20"));
   const revision = S.revision,
     model = copy(S.model);
   change(model);
@@ -179,20 +190,21 @@ async function mutate(change) {
   try {
     const data = await api("/api/sync", { source: S.source, model });
     if (revision !== S.revision)
-      throw new Error("코드가 변경되었습니다. 편집 내용을 다시 적용하세요.");
+      throw new Error(tr("ui_21"));
     invalidateTrace();
     setSource(data.source);
     S.model = data.model;
     S.warnings = data.warnings;
+    S.warningMessages = data.warning_messages || [];
     S.valid = true;
     diagnostics();
     $("#dirty-dot").textContent = "●";
     $("#project-name").textContent = S.model.name;
     $("#mode-label").textContent =
-      S.model.mode === "pull" ? "PULL · 후공정 선택" : "PUSH · 전공정 배정";
+      S.model.mode === "pull" ? tr("ui_15") : tr("ui_16");
     renderTree();
     renderGraph();
-    status("공정도 변경을 Python에 반영했습니다.");
+    status({code: "ui_22"});
   } finally {
     S.busy = false;
   }
@@ -238,23 +250,23 @@ function stateAt(cursor = S.cursor) {
 function renderAllocationComparison() {
   const records = S.result.events.filter(e => ["decision", "blocked"].includes(e.kind));
   const current = records.find(e => e.index === S.comparison);
-  const select = `<label>선택 기록 <select id="allocation-select" aria-label="할당 선택"><option value="">기록 선택</option>${records.map(e => `<option value="${e.index}" ${e === current ? "selected" : ""}>#${e.index} · ${fmt(e.time)}m · ${esc(e.allocation_id || (e.kind === "blocked" ? "경로 없음" : e.outcome === "route_preference" ? "경로 선택 · 예약 전" : "미선택"))} · ${esc(e.lot.id)}</option>`).join("")}</select></label>`;
+  const select = `<label>${tr("ui_23")} <select id="allocation-select" aria-label="${tr("ui_24")}"><option value="">${tr("ui_25")}</option>${records.map(e => `<option value="${e.index}" ${e === current ? "selected" : ""}>#${e.index} · ${fmt(e.time)}m · ${esc(e.allocation_id || (e.kind === "blocked" ? tr("ui_10") : e.outcome === "route_preference" ? tr("ui_26") : tr("ui_27")))} · ${esc(e.lot.id)}</option>`).join("")}</select></label>`;
   const container = $("#trace-content");
   container.innerHTML = `<div class="allocation-comparison">${select}<div id="allocation-detail"></div></div>`;
   $("#allocation-select").onchange = e => {
     if (e.target.value !== "") { pause(); seek(Number(e.target.value) + 1); }
   };
-  if (!current) { $("#allocation-detail").textContent = "재생 시점의 선택 기록이 없습니다. 기록을 선택해 전후를 비교하세요."; return; }
+  if (!current) { $("#allocation-detail").textContent = tr("ui_28"); return; }
   const allocation = S.result.allocations.find(a => a.id === current.allocation_id);
   const beforeCursor = allocation?.before_cursor ?? current.index;
   const afterCursor = allocation?.after_cursor ?? current.index + (current.outcome === "route_preference" ? 2 : 1);
   const before = stateAt(beforeCursor), after = stateAt(afterCursor);
-  const labels = {waiting:"대기", moving:"이동 중", processing:"처리 중", completed:"완료", idle:"유휴", reserved:"예약"};
+  const labels = {waiting:tr("ui_2"), moving:tr("ui_29"), processing:tr("ui_30"), completed:tr("ui_9"), idle:tr("ui_31"), reserved:tr("ui_32")};
   function panel(state, other, title, cursor) {
     const row = (value, previous, content) => `<tr class="${JSON.stringify(value) !== JSON.stringify(previous) ? "state-changed" : ""}">${content}</tr>`;
-    return `<section class="allocation-state"><h3>${title} · 커서 ${cursor}</h3><h4>로트 위치 · 상태 · 배정 목적지</h4><table><thead><tr><th>로트</th><th>위치</th><th>상태</th><th>목적지</th></tr></thead><tbody>${Object.values(state.lots).map(l => row(l, other.lots[l.id], `<td>${esc(l.id)}</td><td>${esc(l.location)}</td><td>${labels[l.state]}</td><td>${esc(l.target || "미배정")}</td>`)).join("")}</tbody></table><h4>머신</h4><table><thead><tr><th>머신</th><th>상태</th><th>로트</th></tr></thead><tbody>${Object.entries(state.machines).map(([id,m]) => row(m, other.machines[id], `<td>${esc(id)}</td><td>${labels[m.state]}</td><td>${esc(m.lot || "—")}</td>`)).join("")}</tbody></table><h4>대기 목록 (준비 시각 · ID 순서)</h4><p>배정된 로트는 목적지 큐, 미배정 로트는 현재 위치에 표시합니다. 예약 로트는 머신에 표시합니다.</p><table><thead><tr><th>위치 / 목적지</th><th>개수</th><th>순서</th></tr></thead><tbody>${Object.entries(state.queues).map(([id,q]) => row(q, other.queues[id], `<td>${esc(id)}</td><td>${q.length}</td><td>${q.map(esc).join(" → ") || "—"}</td>`)).join("")}</tbody></table></section>`;
+    return `<section class="allocation-state"><h3>${title} ${tr("ui_33")} ${cursor}</h3><h4>${tr("ui_34")}</h4><table><thead><tr><th>${tr("ui_35")}</th><th>${tr("ui_36")}</th><th>${tr("ui_37")}</th><th>${tr("ui_38")}</th></tr></thead><tbody>${Object.values(state.lots).map(l => row(l, other.lots[l.id], `<td>${esc(l.id)}</td><td>${esc(l.location)}</td><td>${labels[l.state]}</td><td>${esc(l.target || tr("ui_39"))}</td>`)).join("")}</tbody></table><h4>${tr("ui_40")}</h4><table><thead><tr><th>${tr("ui_40")}</th><th>${tr("ui_37")}</th><th>${tr("ui_35")}</th></tr></thead><tbody>${Object.entries(state.machines).map(([id,m]) => row(m, other.machines[id], `<td>${esc(id)}</td><td>${labels[m.state]}</td><td>${esc(m.lot || "—")}</td>`)).join("")}</tbody></table><h4>${tr("ui_41")}</h4><p>${tr("ui_42")}</p><table><thead><tr><th>${tr("ui_43")}</th><th>${tr("ui_44")}</th><th>${tr("ui_45")}</th></tr></thead><tbody>${Object.entries(state.queues).map(([id,q]) => row(q, other.queues[id], `<td>${esc(id)}</td><td>${q.length}</td><td>${q.map(esc).join(" → ") || "—"}</td>`)).join("")}</tbody></table></section>`;
   }
-  $("#allocation-detail").innerHTML = `<h3>${esc(allocation?.id || "할당 없음")} · ${esc(allocation?.destination || (current.outcome === "route_preference" ? "경로 선택 · 예약 전" : "미선택 / 경로 없음"))}</h3><p>선택 이유: ${esc(current.reason)} · 현재 재생 커서 ${S.cursor}</p><p>강조한 행은 전후 변경 항목입니다. 할당 후는 이동 시작 전입니다.</p><button id="allocation-before">할당 전으로 이동</button> <button id="allocation-after">할당 후로 이동</button><div class="allocation-pair">${panel(before, after, "할당 전", beforeCursor)}${panel(after, before, allocation ? "할당 후" : "선택 기록 후 · 할당 없음", afterCursor)}</div><h3>선택 후보 / 조건 제외</h3>${(current.candidates || []).map(c => `<div class="info-card ${c.id === current.chosen ? "selected" : ""}"><b>${c.id === current.chosen ? "선택" : "미선택 (개별 사유 미제공)"} · ${esc(c.lot_id)} / ${esc(c.route_id)}</b>${esc(c.from)} → ${esc(c.to)} · 우선순위 ${c.priority} · 대기 ${c.queue_length}</div>`).join("")}${(current.checks || []).filter(c => !c.eligible).map(c => `<div class="info-card rejected">조건 제외 · ${esc(c.lot_id)} / ${esc(c.route_id)} · ${esc(c.reason)}</div>`).join("")}`;
+  $("#allocation-detail").innerHTML = `<h3>${esc(allocation?.id || tr("ui_46"))} · ${esc(allocation?.destination || (current.outcome === "route_preference" ? tr("ui_26") : tr("ui_47")))}</h3><p>${tr("ui_48")} ${esc(localized(current.reason, current.reason_message))} ${tr("ui_49")} ${S.cursor}</p><p>${tr("ui_50")}</p><button id="allocation-before">${tr("ui_51")}</button> <button id="allocation-after">${tr("ui_52")}</button><div class="allocation-pair">${panel(before, after, tr("ui_53"), beforeCursor)}${panel(after, before, allocation ? tr("ui_54") : tr("ui_55"), afterCursor)}</div><h3>${tr("ui_56")}</h3>${(current.candidates || []).map(c => `<div class="info-card ${c.id === current.chosen ? "selected" : ""}"><b>${c.id === current.chosen ? tr("ui_57") : tr("ui_58")} · ${esc(c.lot_id)} / ${esc(c.route_id)}</b>${esc(c.from)} → ${esc(c.to)} ${tr("ui_59")} ${c.priority} ${tr("ui_60")} ${c.queue_length}</div>`).join("")}${(current.checks || []).filter(c => !c.eligible).map(c => `<div class="info-card rejected">${tr("ui_61")} ${esc(c.lot_id)} / ${esc(c.route_id)} · ${esc(localized(c.reason, c.reason_message))}</div>`).join("")}`;
   $("#allocation-before").onclick = () => {pause(); seek(beforeCursor, true);};
   $("#allocation-after").onclick = () => {pause(); seek(afterCursor, true);};
 }
@@ -305,7 +317,7 @@ function renderGraph() {
           .map((e) => e.route)
       : [],
   );
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * S.zoom}" height="${height * S.zoom}" viewBox="0 0 ${width} ${height}" role="img" aria-label="공정, 라인, 머신 및 로트 이동 경로"><defs><marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#a6bca6"/></marker><marker id="arrow-active" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#32855c"/></marker></defs>`;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * S.zoom}" height="${height * S.zoom}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${tr("ui_62")}"><defs><marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#a6bca6"/></marker><marker id="arrow-active" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#32855c"/></marker></defs>`;
   for (const { p, x } of groups) {
     svg += `<rect x="${x}" y="21" width="165" height="${height - 40}" rx="11" fill="#f7faf5" fill-opacity=".85" stroke="#e7eee2"/><text x="${x + 15}" y="47" class="process-heading">${esc(p.name)}</text><text x="${x + 143}" y="47" class="process-number">${String(groups.findIndex((g) => g.p === p) + 1).padStart(2, "0")}</text>`;
     for (const [line, row] of rows)
@@ -329,7 +341,7 @@ function renderGraph() {
     const current = active?.route === r.id;
     const highlight =
       routeHistory.has(r.id) || (S.selected?.type === "route" && S.selected.id === r.id);
-    svg += `<g class="route-group" data-route="${esc(r.id)}" tabindex="0" role="button" aria-label="경로 ${esc(r.from)} → ${esc(r.to)}"><title>${esc(r.from)} → ${esc(r.to)} · 우선순위 ${r.priority} · ${r.delay} min · 제품 ${esc(r.product)}</title><path class="route-hit" d="${d}"/><path class="route-path ${cross ? "cross" : ""} ${!r.enabled ? "disabled" : ""} ${highlight ? "highlight" : ""} ${current ? "current" : ""}" d="${d}" marker-end="url(#${highlight ? "arrow-active" : "arrow"})"/>${current ? `<circle r="4" fill="#d7a24f"><animateMotion dur="1.8s" repeatCount="indefinite" path="${d}"/></circle>` : ""}</g>`;
+    svg += `<g class="route-group" data-route="${esc(r.id)}" tabindex="0" role="button" aria-label="${tr("ui_63")} ${esc(r.from)} → ${esc(r.to)}"><title>${esc(r.from)} → ${esc(r.to)} ${tr("ui_59")} ${r.priority} · ${r.delay} ${tr("ui_64")} ${esc(r.product)}</title><path class="route-hit" d="${d}"/><path class="route-path ${cross ? "cross" : ""} ${!r.enabled ? "disabled" : ""} ${highlight ? "highlight" : ""} ${current ? "current" : ""}" d="${d}" marker-end="url(#${highlight ? "arrow-active" : "arrow"})"/>${current ? `<circle r="4" fill="#d7a24f"><animateMotion dur="1.8s" repeatCount="indefinite" path="${d}"/></circle>` : ""}</g>`;
   }
   for (const terminal of ["INPUT", "OUTPUT"]) {
     const p = positions[terminal],
@@ -343,7 +355,7 @@ function renderGraph() {
         (l) => l.location === m.id && l.state === "waiting",
       ).length;
     const selected = S.selected?.id === m.id;
-    svg += `<g class="machine-node ${state?.state || ""} ${selected ? "selected" : ""}" data-node="${esc(m.id)}" tabindex="0" role="button" aria-label="${esc(m.name)} 속성"><rect class="node-bg" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="7"/><rect x="${p.x + 10}" y="${p.y + 11}" width="20" height="20" rx="5" fill="${state?.state === "processing" ? "#d7ebda" : "#eff3ea"}"/><path d="M${p.x + 15} ${p.y + 25}v-8h4v4h5v4z" fill="none" stroke="#719069" stroke-width="1.2"/><text x="${p.x + 37}" y="${p.y + 21}" class="node-name">${esc(m.name.length > 10 ? m.name.slice(0, 9) + "…" : m.name)}</text><text x="${p.x + 37}" y="${p.y + 33}" class="node-meta">${esc(m.id)} · ${m.time}m</text><line x1="${p.x + 10}" y1="${p.y + 41}" x2="${p.x + p.w - 10}" y2="${p.y + 41}" stroke="#edf2e8"/><circle cx="${p.x + 13}" cy="${p.y + 51}" r="2.4" fill="${state?.state === "processing" ? "#51a277" : state ? "#d5a45a" : "#b6c5b0"}"/><text x="${p.x + 21}" y="${p.y + 54}" class="node-status">${state ? `${esc(state.lot)} ${state.state === "processing" ? "처리" : "예약"}` : "IDLE"}</text><text x="${p.x + p.w - 10}" y="${p.y + 54}" text-anchor="end" class="node-meta">대기 ${waiting}</text></g>`;
+    svg += `<g class="machine-node ${state?.state || ""} ${selected ? "selected" : ""}" data-node="${esc(m.id)}" tabindex="0" role="button" aria-label="${esc(m.name)} ${tr("ui_65")}"><rect class="node-bg" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="7"/><rect x="${p.x + 10}" y="${p.y + 11}" width="20" height="20" rx="5" fill="${state?.state === "processing" ? "#d7ebda" : "#eff3ea"}"/><path d="M${p.x + 15} ${p.y + 25}v-8h4v4h5v4z" fill="none" stroke="#719069" stroke-width="1.2"/><text x="${p.x + 37}" y="${p.y + 21}" class="node-name">${esc(m.name.length > 10 ? m.name.slice(0, 9) + "…" : m.name)}</text><text x="${p.x + 37}" y="${p.y + 33}" class="node-meta">${esc(m.id)} · ${m.time}m</text><line x1="${p.x + 10}" y1="${p.y + 41}" x2="${p.x + p.w - 10}" y2="${p.y + 41}" stroke="#edf2e8"/><circle cx="${p.x + 13}" cy="${p.y + 51}" r="2.4" fill="${state?.state === "processing" ? "#51a277" : state ? "#d5a45a" : "#b6c5b0"}"/><text x="${p.x + 21}" y="${p.y + 54}" class="node-status">${state ? `${esc(state.lot)} ${state.state === "processing" ? tr("ui_66") : tr("ui_32")}` : "IDLE"}</text><text x="${p.x + p.w - 10}" y="${p.y + 54}" text-anchor="end" class="node-meta">${tr("ui_2")} ${waiting}</text></g>`;
   }
   svg += "</svg>";
   $("#graph").innerHTML = svg;
@@ -391,12 +403,12 @@ function renderTrace() {
   const container = $("#trace-content"),
     events = S.result?.events.slice(0, S.cursor) || [];
   if (S.tab === "console") {
-    container.innerHTML = `<pre class="console ${S.parseError ? "error" : ""}">${esc([S.parseError, ...S.warnings, S.console].filter(Boolean).join("\n\n") || "진단 없음. 로컬 SimPy 런타임이 준비되었습니다.\n코드 수정 → 공정도 갱신 → 시뮬레이션 실행")}</pre>`;
+    container.innerHTML = `<pre class="console ${S.parseError ? "error" : ""}">${esc([S.parseError, ...S.warnings.map((w,i) => localized(w, S.warningMessages?.[i])), S.console, displayMessage(S.runtimeError)].filter(Boolean).join("\n\n") || tr("ui_67"))}</pre>`;
     return;
   }
   if (!S.result) {
     container.innerHTML =
-      '<div class="empty"><b>첫 시뮬레이션을 실행해 보세요.</b>로트가 움직일 때마다, 경로와 선택 이유가 여기에 기록됩니다.<br>상단의 실행 버튼 또는 Ctrl+Enter</div>';
+      `<div class="empty"><b>${tr("ui_68")}</b>${tr("ui_69")}<br>${tr("ui_70")}</div>`;
     return;
   }
   if (S.tab === "results") { renderAllocationResults(); return; }
@@ -420,12 +432,12 @@ function renderTrace() {
           return `<div class="util-row"><span>${esc(m.name)}</span><div class="util-track"><div style="width:${value}%"></div></div><span>${fmt(value)}%</span></div>`;
         })
         .join("") +
-      '<p class="inline-help" style="padding:0 18px">처리 시작~종료 시간 ÷ 경과 시간. 이동은 제외하며 사용자 정의 프로세스 내부 대기는 포함합니다.</p>';
+      `<p class="inline-help" style="padding:0 18px">${tr("ui_71")}</p>`;
     return;
   }
   if (S.tab === "lots") {
     const lots = Object.values(stateAt().lots);
-    container.innerHTML = `<table><thead><tr><th>LOT ID</th><th>제품</th><th>상태</th><th>현재 위치 → 목적지</th><th>경과 시간</th></tr></thead><tbody>${lots.map((l) => `<tr class="clickable ${S.lot === l.id ? "selected-lot" : ""}" data-lot="${esc(l.id)}"><td class="mono">${esc(l.id)}</td><td>${esc(l.product)}</td><td>${esc({ waiting: "대기", moving: "이동", processing: "처리", completed: "완료" }[l.state])}</td><td>${esc(l.location)}${l.target && l.target !== l.location ? " → " + esc(l.target) : ""}</td><td>${fmt((l.completed ?? stateAt().time) - l.created)} min</td></tr>`).join("")}</tbody></table>`;
+    container.innerHTML = `<table><thead><tr><th>${tr("lot_id")}</th><th>${tr("ui_72")}</th><th>${tr("ui_37")}</th><th>${tr("ui_73")}</th><th>${tr("ui_74")}</th></tr></thead><tbody>${lots.map((l) => `<tr class="clickable ${S.lot === l.id ? "selected-lot" : ""}" data-lot="${esc(l.id)}"><td class="mono">${esc(l.id)}</td><td>${esc(l.product)}</td><td>${esc({ waiting: tr("ui_2"), moving: tr("ui_6"), processing: tr("ui_66"), completed: tr("ui_9") }[l.state])}</td><td>${esc(l.location)}${l.target && l.target !== l.location ? " → " + esc(l.target) : ""}</td><td>${fmt((l.completed ?? stateAt().time) - l.created)} min</td></tr>`).join("")}</tbody></table>`;
     $$("[data-lot]").forEach((r) => (r.onclick = () => inspectLot(r.dataset.lot)));
     return;
   }
@@ -435,9 +447,9 @@ function renderTrace() {
     .reverse();
   container.innerHTML =
     (S.lot
-      ? `<div class="lot-filter">${esc(S.lot)} 경로 추적 중<button id="clear-lot">전체 로트 보기</button></div>`
+      ? `<div class="lot-filter">${esc(S.lot)} ${tr("ui_75")}<button id="clear-lot">${tr("ui_76")}</button></div>`
       : "") +
-    `<table><thead><tr><th>TIME (MIN)</th><th>LOT</th><th>EVENT</th><th>LOCATION</th><th>DETAIL</th></tr></thead><tbody>${filtered.map((e) => `<tr class="clickable ${e.index === S.cursor - 1 ? "current" : ""}" data-event="${e.index}"><td class="mono">${fmt(e.time)}</td><td class="mono">${esc(e.lot.id)}</td><td><span class="kind ${e.kind}">${kinds[e.kind] || esc(e.kind)}</span></td><td>${esc(e.machine || e.lot.location)}</td><td>${esc(e.kind === "decision" ? e.reason : e.kind === "move" ? `${e.lot.location} → ${e.lot.target}` : e.kind === "start" ? (e.duration === null ? "사용자 정의 SimPy 프로세스" : `처리 시간 ${fmt(e.duration)} min`) : e.reason || e.route || "—")}</td></tr>`).join("")}</tbody></table>`;
+    `<table><thead><tr><th>${tr("event_time")}</th><th>${tr("event_lot")}</th><th>${tr("event_kind")}</th><th>${tr("event_location")}</th><th>${tr("event_detail")}</th></tr></thead><tbody>${filtered.map((e) => `<tr class="clickable ${e.index === S.cursor - 1 ? "current" : ""}" data-event="${e.index}"><td class="mono">${fmt(e.time)}</td><td class="mono">${esc(e.lot.id)}</td><td><span class="kind ${e.kind}">${kinds[e.kind] || esc(e.kind)}</span></td><td>${esc(e.machine || e.lot.location)}</td><td>${esc(e.kind === "decision" ? localized(e.reason, e.reason_message) : e.kind === "move" ? `${e.lot.location} → ${e.lot.target}` : e.kind === "start" ? (e.duration === null ? tr("ui_77") : `${tr("ui_78")} ${fmt(e.duration)} min`) : localized(e.reason, e.reason_message) || e.route || "—")}</td></tr>`).join("")}</tbody></table>`;
   $$("[data-event]").forEach((r) => (r.onclick = () => inspectEvent(Number(r.dataset.event))));
   if ($("#clear-lot"))
     $("#clear-lot").onclick = () => {
@@ -454,6 +466,7 @@ function seek(cursor, preserveComparison = false) {
     const allocation = S.result?.allocations?.find(a => a.id === event?.allocation_id);
     S.comparison = event?.kind === "decision" || event?.kind === "blocked" ? event.index : allocation?.decision_index ?? S.result?.events.slice(0, S.cursor).findLast(e => ["decision", "blocked"].includes(e.kind))?.index;
   }
+  persistReplay();
   renderPlayback();
   renderMetrics();
   renderGraph();
@@ -494,10 +507,10 @@ function tick() {
   if (stop) {
     pause();
     inspectEvent(next - 1);
-    status("의사결정 기록에서 재생을 멈췄습니다.");
+    status({code: "ui_79"});
   } else if (next === S.result.events.length) {
     pause();
-    status("기록 재생 완료");
+    status({code: "ui_80"});
   } else playTimer = setTimeout(tick, 240);
 }
 function openInspector(title, html) {
@@ -518,7 +531,7 @@ function selectField(label, name, value, options) {
   return `<label class="field"><span>${esc(label)}</span><select name="${name}">${options.map((o) => `<option value="${esc(o[0])}" ${o[0] === value ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select></label>`;
 }
 function actions(deletable = false) {
-  return `<div id="form-error" class="form-error" role="alert"></div><div class="form-actions">${deletable ? '<button type="button" id="delete-item" class="danger">삭제</button>' : ""}<button class="primary" type="submit">코드에 적용</button></div>`;
+  return `<div id="form-error" class="form-error" role="alert"></div><div class="form-actions">${deletable ? `<button type="button" id="delete-item" class="danger">${tr("ui_81")}</button>` : ""}<button class="primary" type="submit">${tr("ui_82")}</button></div>`;
 }
 function bindForm(handler) {
   $("#property-form").onsubmit = async (e) => {
@@ -527,10 +540,10 @@ function bindForm(handler) {
     button.disabled = true;
     try {
       await handler(new FormData(e.target));
-      toast("코드와 공정도에 반영했습니다.");
+      toast({code: "ui_83"});
     } catch (err) {
       if ($("#form-error")) $("#form-error").textContent = err.message;
-      else toast(err.message);
+      else toast(err.detail || err.message);
     } finally {
       button.disabled = false;
     }
@@ -555,18 +568,18 @@ function locate(id) {
 }
 function inspectMachine(id, newMachine = false) {
   const m = newMachine
-    ? { id, name: "새 머신", process: S.model.processes[0].id, line: "A", time: 5 }
+    ? { id, name: tr("ui_84"), process: S.model.processes[0].id, line: "A", time: 5 }
     : S.model.machines.find((m) => m.id === id);
   if (!m) return;
   S.selected = { type: "machine", id };
   openInspector(
-    newMachine ? "머신 추가" : "머신 속성",
-    `<h3>${esc(m.name)}</h3><p>머신 하나는 한 번에 로트 하나를 처리합니다. 같은 공정·라인으로 그룹화됩니다.</p><form id="property-form">${field("ID", "id", m.id, "text", newMachine ? 'required pattern="[A-Za-z][A-Za-z0-9_-]*"' : "readonly")}${field("이름", "name", m.name, "text", "required")}${selectField(
-      "공정",
+    newMachine ? tr("ui_85") : tr("ui_86"),
+    `<h3>${esc(m.name)}</h3><p>${tr("ui_87")}</p><form id="property-form">${field("ID", "id", m.id, "text", newMachine ? 'required pattern="[A-Za-z][A-Za-z0-9_-]*"' : "readonly")}${field(tr("ui_88"), "name", m.name, "text", "required")}${selectField(
+      tr("ui_89"),
       "process",
       m.process,
       S.model.processes.map((p) => [p.id, p.name]),
-    )}${field("라인", "line", m.line, "text", "required")}${field("기본 처리 시간 (min)", "time", m.time, "number", 'min="0.01" step="any" required')}${actions(!newMachine)}</form>${!newMachine ? '<button id="locate-code" class="quiet" style="margin-top:15px">Python 정의로 이동 ↗</button>' : ""}`,
+    )}${field(tr("ui_90"), "line", m.line, "text", "required")}${field(tr("ui_91"), "time", m.time, "number", 'min="0.01" step="any" required')}${actions(!newMachine)}</form>${!newMachine ? `<button id="locate-code" class="quiet" style="margin-top:15px">${tr("ui_92")}</button>` : ""}`,
   );
   bindForm(async (f) => {
     const machine = {
@@ -595,7 +608,7 @@ function inspectMachine(id, newMachine = false) {
           model.routes = model.routes.filter((r) => r.from !== id && r.to !== id);
         });
         closeInspector();
-        toast("머신과 연결 경로를 삭제했습니다.");
+        toast({code: "ui_93"});
       } catch (e) {
         $("#form-error").textContent = e.message;
       }
@@ -620,8 +633,8 @@ function inspectRoute(id, newRoute = false) {
   S.selected = { type: "route", id };
   const machines = S.model.machines.map((m) => [m.id, `${m.name} (${m.id})`]);
   openInspector(
-    newRoute ? "이동 경로 추가" : "이동 규칙",
-    `<span class="info-tag">ROUTING RULE</span><h3 style="margin-top:12px">${esc(r.from)} → ${esc(r.to)}</h3><p>숫자가 낮은 경로가 우선입니다. 서로 다른 라인도 연결할 수 있습니다. ‘*’는 모든 제품을 허용합니다.</p><form id="property-form">${field("ID", "id", r.id, "text", newRoute ? "required" : "readonly")}${selectField("출발", "from", r.from, [["INPUT", "INPUT · 투입"], ...machines])}${selectField("도착", "to", r.to, [...machines, ["OUTPUT", "OUTPUT · 완료"]])}${field("우선순위 (작을수록 우선)", "priority", r.priority, "number", 'min="0" max="1000" required')}${field("이동 시간 (min)", "delay", r.delay, "number", 'min="0" step="any" required')}${field("허용 제품 (* = 전체)", "product", r.product, "text", "required")}<label class="field"><span>경로 활성화</span><input name="enabled" type="checkbox" ${r.enabled ? "checked" : ""}></label>${actions(!newRoute)}</form>`,
+    newRoute ? tr("ui_94") : tr("ui_95"),
+    `<span class="info-tag">${tr("routing_rule")}</span><h3 style="margin-top:12px">${esc(r.from)} → ${esc(r.to)}</h3><p>${tr("ui_96")}</p><form id="property-form">${field("ID", "id", r.id, "text", newRoute ? "required" : "readonly")}${selectField(tr("ui_97"), "from", r.from, [["INPUT", tr("ui_98")], ...machines])}${selectField(tr("ui_99"), "to", r.to, [...machines, ["OUTPUT", tr("ui_100")]])}${field(tr("ui_101"), "priority", r.priority, "number", 'min="0" max="1000" required')}${field(tr("ui_102"), "delay", r.delay, "number", 'min="0" step="any" required')}${field(tr("ui_103"), "product", r.product, "text", "required")}<label class="field"><span>${tr("ui_104")}</span><input name="enabled" type="checkbox" ${r.enabled ? "checked" : ""}></label>${actions(!newRoute)}</form>`,
   );
   bindForm(async (f) => {
     const route = {
@@ -657,11 +670,11 @@ function inspectRoute(id, newRoute = false) {
   renderGraph();
 }
 function inspectProcess(id, newProcess = false) {
-  const p = newProcess ? { id, name: "새 공정" } : S.model.processes.find((p) => p.id === id);
+  const p = newProcess ? { id, name: tr("ui_105") } : S.model.processes.find((p) => p.id === id);
   S.selected = { type: "process", id };
   openInspector(
-    newProcess ? "공정 추가" : "공정 속성",
-    `<p>공정 안에 라인과 머신을 구성합니다. 직렬·병렬 관계는 머신 사이 경로로 정의합니다.</p><form id="property-form">${field("ID", "id", p.id, "text", newProcess ? "required" : "readonly")}${field("이름", "name", p.name, "text", "required")}${actions(!newProcess)}</form>`,
+    newProcess ? tr("ui_106") : tr("ui_107"),
+    `<p>${tr("ui_108")}</p><form id="property-form">${field("ID", "id", p.id, "text", newProcess ? "required" : "readonly")}${field(tr("ui_88"), "name", p.name, "text", "required")}${actions(!newProcess)}</form>`,
   );
   bindForm(async (f) => {
     await mutate((m) => {
@@ -675,7 +688,7 @@ function inspectProcess(id, newProcess = false) {
       try {
         await mutate((m) => {
           if (m.machines.some((x) => x.process === id))
-            throw new Error("공정에 속한 머신을 먼저 이동하거나 삭제하세요.");
+            throw new Error(tr("ui_109"));
           m.processes = m.processes.filter((p) => p.id !== id);
         });
         closeInspector();
@@ -689,16 +702,16 @@ function inspectSettings() {
   if (!m) return;
   S.selected = { type: "settings" };
   openInspector(
-    "실행 설정",
-    `<form id="property-form">${field("프로젝트 이름", "name", m.name, "text", "required")}${selectField(
-      "로트 이동 결정 방식",
+    tr("ui_110"),
+    `<form id="property-form">${field(tr("ui_111"), "name", m.name, "text", "required")}${selectField(
+      tr("ui_112"),
       "mode",
       m.mode,
       [
-        ["pull", "Pull · 후공정이 로트 선택"],
-        ["push", "Push · 전공정이 목적지 배정"],
+        ["pull", tr("ui_113")],
+        ["push", tr("ui_114")],
       ],
-    )}<p>Pull은 머신이 비었을 때 후보 로트를 선택합니다. Push는 처리를 마친 로트의 목적지를 먼저 정하고, 해당 목적지에서 FIFO로 처리합니다.</p>${field("실행 기간 (min)", "duration", m.duration, "number", 'min="0.01" max="100000" step="any" required')}${field("랜덤 시드", "seed", m.seed, "number", 'min="0" max="4294967295" step="1" required')}${field("전체 로트 수", "count", m.source.count, "number", 'min="1" max="2000" step="1" required')}${field("투입 간격 (min)", "interval", m.source.interval, "number", 'min="0.01" step="any" required')}${field("제품 순환 목록 (쉼표 구분)", "products", m.source.products.join(", "), "text", "required")}${actions()}</form>`,
+    )}<p>${tr("ui_115")}</p>${field(tr("ui_116"), "duration", m.duration, "number", 'min="0.01" max="100000" step="any" required')}${field(tr("ui_117"), "seed", m.seed, "number", 'min="0" max="4294967295" step="1" required')}${field(tr("ui_118"), "count", m.source.count, "number", 'min="1" max="2000" step="1" required')}${field(tr("ui_119"), "interval", m.source.interval, "number", 'min="0.01" step="any" required')}${field(tr("ui_120"), "products", m.source.products.join(", "), "text", "required")}${actions()}</form>`,
   );
   bindForm(async (f) => {
     await mutate((m) => {
@@ -724,22 +737,22 @@ function inspectEvent(index) {
   pause();
   S.selected = { type: "event", id: index };
   seek(index + 1);
-  let html = `<span class="info-tag">${esc(kinds[e.kind])} · ${fmt(e.time)} min</span><h3 style="margin-top:13px">${esc(e.lot.id)} <span class="subtle">제품 ${esc(e.lot.product)}</span></h3><button id="track-lot" class="quiet">이 로트의 전체 경로 추적 ↗</button>`;
+  let html = `<span class="info-tag">${esc(kinds[e.kind])} · ${fmt(e.time)} min</span><h3 style="margin-top:13px">${esc(e.lot.id)} <span class="subtle">${tr("ui_72")} ${esc(e.lot.product)}</span></h3><button id="track-lot" class="quiet">${tr("ui_121")}</button>`;
   if (e.kind === "decision") {
-    html += `<div class="info-card selected"><b>선택 이유</b>${esc(e.reason)}<small>${e.decision_mode === "pull" && e.machine ? `${esc(e.machine)}가 준비된 로트를 선택` : "출발 로트가 다음 목적지 선택"}</small></div><h3>비교한 후보 ${e.candidates.length}개</h3>`;
+    html += `<div class="info-card selected"><b>${tr("ui_122")}</b>${esc(localized(e.reason, e.reason_message))}<small>${e.decision_mode === "pull" && e.machine ? `${esc(e.machine)}${tr("ui_123")}` : tr("ui_124")}</small></div><h3>${tr("ui_125")} ${e.candidates.length}${tr("ui_126")}</h3>`;
     for (const c of e.candidates)
-      html += `<div class="info-card ${c.id === e.chosen ? "selected" : ""}"><b>${c.id === e.chosen ? "✓ 선택" : "미선택"} · ${esc(c.lot_id)}</b><span class="route-key">${esc(c.from)} → ${esc(c.to)}</span><br>우선순위 ${c.priority} · 목적지 대기 ${c.queue_length}<br>${c.same_line ? "동일 라인" : "다른 라인 또는 입출고"} · 준비 ${fmt(c.ready_since)}m<small>${c.id === e.chosen ? "반환된 후보 ID와 일치" : "유효 후보였으나 사용자 선택 함수가 선택하지 않음"}</small></div>`;
+      html += `<div class="info-card ${c.id === e.chosen ? "selected" : ""}"><b>${c.id === e.chosen ? tr("ui_127") : tr("ui_27")} · ${esc(c.lot_id)}</b><span class="route-key">${esc(c.from)} → ${esc(c.to)}</span><br>${tr("ui_128")} ${c.priority} ${tr("ui_129")} ${c.queue_length}<br>${c.same_line ? tr("ui_130") : tr("ui_131")} ${tr("ui_132")} ${fmt(c.ready_since)}m<small>${c.id === e.chosen ? tr("ui_133") : tr("ui_134")}</small></div>`;
     for (const c of e.checks.filter((c) => !c.eligible))
-      html += `<div class="info-card rejected"><b>제외 · ${esc(c.lot_id)} / ${esc(c.route_id)}</b>${esc(c.reason)}</div>`;
+      html += `<div class="info-card rejected"><b>${tr("ui_135")} ${esc(c.lot_id)} / ${esc(c.route_id)}</b>${esc(localized(c.reason, c.reason_message))}</div>`;
     html +=
-      "<p>후보 비교는 이 시점의 준비된 로트와 연결 경로를 기준으로 합니다. 처리 중 로트는 후보가 아닙니다.</p>";
+      `<p>${tr("ui_136")}</p>`;
   } else {
-    html += `<div class="info-card"><b>${esc(e.lot.location)}${e.lot.target ? " → " + esc(e.lot.target) : ""}</b>${esc(e.reason || e.route || "로트 상태 변경")}${e.duration ? `<br>처리 시간: ${fmt(e.duration)} min` : ""}</div>`;
+    html += `<div class="info-card"><b>${esc(e.lot.location)}${e.lot.target ? " → " + esc(e.lot.target) : ""}</b>${esc(localized(e.reason, e.reason_message) || e.route || tr("ui_137"))}${e.duration ? `<br>${tr("ui_138")} ${fmt(e.duration)} min` : ""}</div>`;
     for (const c of e.checks || [])
-      html += `<div class="info-card rejected">${esc(c.route_id)} · ${esc(c.reason)}</div>`;
+      html += `<div class="info-card rejected">${esc(c.route_id)} · ${esc(localized(c.reason, c.reason_message))}</div>`;
   }
-  html += `<button id="compare-allocation">할당 전후 비교</button>`;
-  openInspector("의사결정 / 이벤트", html);
+  html += `<button id="compare-allocation">${tr("ui_139")}</button>`;
+  openInspector(tr("ui_140"), html);
   $("#compare-allocation").onclick = () => { closeInspector(); selectTab("allocations"); };
   $("#track-lot").onclick = () => inspectLot(e.lot.id);
   renderGraph();
@@ -749,15 +762,15 @@ function inspectLot(id, refresh = true) {
   S.selected = { type: "lot", id };
   const events = (S.result?.events.slice(0, S.cursor) || []).filter((e) => e.lot.id === id);
   openInspector(
-    "로트 경로 추적",
-    `<h3>${esc(id)}</h3><p>현재 재생 시점까지의 이동과 선택입니다. 공정도에서 지나온 경로가 강조됩니다.</p>${
+    tr("ui_141"),
+    `<h3>${esc(id)}</h3><p>${tr("ui_142")}</p>${
       events
         .filter((e) => ["arrival", "decision", "move", "complete", "blocked"].includes(e.kind))
         .map(
           (e) =>
-            `<div class="info-card" data-lot-event="${e.index}" role="button" tabindex="0"><small>${fmt(e.time)} min · ${esc(kinds[e.kind])}</small><b>${esc(e.kind === "move" ? e.lot.location + " → " + e.lot.target : e.lot.location)}</b>${esc(e.reason || "")}</div>`,
+            `<div class="info-card" data-lot-event="${e.index}" role="button" tabindex="0"><small>${fmt(e.time)} min · ${esc(kinds[e.kind])}</small><b>${esc(e.kind === "move" ? e.lot.location + " → " + e.lot.target : e.lot.location)}</b>${esc(localized(e.reason, e.reason_message) || "")}</div>`,
         )
-        .join("") || "<p>아직 투입되지 않은 로트입니다.</p>"
+        .join("") || `<p>${tr("ui_143")}</p>`
     }`,
   );
   $$("[data-lot-event]").forEach((el) => {
@@ -786,9 +799,11 @@ async function run() {
     revision = S.revision,
     ticket = ++runSerial;
   S.busy = true;
+  S.runtimeError = null;
+  S.console = "";
   pause();
-  status("로컬 SimPy 실행 중…");
-  $("#run-button").textContent = "■ 실행 중지";
+  status({code: "ui_144"});
+  $("#run-button").textContent = tr("ui_145");
   try {
     const { job_id } = await api("/api/run", { source });
     S.job = job_id;
@@ -801,19 +816,20 @@ async function run() {
     } while (job.status === "running");
     if (S.job !== job_id) return;
     if (job.status === "cancelled") {
-      status("실행을 중지했습니다.");
+      status({code: "ui_146"});
       return;
     }
     const p = job.payload;
     S.console = (p.result?.console || p.console || "") + (p.traceback ? "\n" + p.traceback : "");
-    if (!p.ok) throw new Error(p.error);
+    if (!p.ok) throw Object.assign(new Error(localized(p.error, p.error_message)), {detail: p.error_message});
     if (S.revision !== revision) {
-      toast("실행 중 코드가 바뀌어 이전 결과를 적용하지 않았습니다. 다시 실행하세요.");
-      status("코드 변경됨 · 다시 실행 필요");
+      toast({code: "ui_147"});
+      status({code: "ui_148"});
       return;
     }
     S.result = p.result;
     S.warnings = p.result.warnings;
+    S.warningMessages = p.result.warning_messages || [];
     S.cursor = 0;
     S.lot = null;
     S.selected = null;
@@ -821,18 +837,18 @@ async function run() {
     diagnostics();
     selectTab("events");
     seek(Math.min(S.result.events.length, 1));
-    status(`SimPy 실행 완료 · ${S.result.events.length}개 이벤트 · 재생 중`);
+    status({code: "run_complete", args: [S.result.events.length]});
     play();
   } catch (e) {
-    S.console += "\n" + e.message;
+    S.runtimeError = e.detail || e.message;
     selectTab("console");
-    toast(e.message);
-    status("실행 오류 · 콘솔을 확인하세요.");
+    toast(e.detail || e.message);
+    status({code: "ui_151"});
   } finally {
     if (ticket === runSerial) {
       S.job = null;
       S.busy = false;
-      $("#run-button").textContent = "▶ 시뮬레이션 실행";
+      $("#run-button").textContent = tr("ui_152");
     }
   }
 }
@@ -843,8 +859,8 @@ async function cancelRun() {
   ++runSerial;
   S.job = null;
   S.busy = false;
-  $("#run-button").textContent = "▶ 시뮬레이션 실행";
-  status("실행 프로세스를 중지했습니다.");
+  $("#run-button").textContent = tr("ui_152");
+  status({code: "ui_153"});
 }
 function download(filename, text, type = "text/plain") {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -857,7 +873,7 @@ function download(filename, text, type = "text/plain") {
 function save() {
   download("factory_model.py", S.source, "text/x-python");
   $("#dirty-dot").textContent = "";
-  toast("Python 파일을 저장했습니다.");
+  toast({code: "ui_154"});
 }
 function nextId(prefix, items) {
   let i = 1;
@@ -872,7 +888,7 @@ $("#code").addEventListener("input", () => {
   updateEditor();
   invalidateTrace();
   $("#dirty-dot").textContent = "●";
-  $("#sync-status").textContent = "● 코드 분석 중…";
+  $("#sync-status").textContent = tr("ui_155");
   clearTimeout(parseTimer);
   parseTimer = setTimeout(() => applyCode(true), 500);
 });
@@ -945,7 +961,7 @@ $("#file-input").onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   try {
-    if (file.size > 1_000_000) throw new Error("파일 한도는 1 MB입니다.");
+    if (file.size > 1_000_000) throw new Error(tr("ui_156"));
     const source = await file.text();
     await api("/api/parse", { source });
     if (S.job) await cancelRun();
@@ -953,9 +969,9 @@ $("#file-input").onchange = async (e) => {
     setSource(source);
     closeInspector();
     await applyCode();
-    toast("Python 프로젝트를 열었습니다.");
+    toast({code: "ui_157"});
   } catch (e) {
-    toast(e.message);
+    toast(e.detail || e.message);
   } finally {
     $("#file-input").value = "";
   }
@@ -1043,8 +1059,8 @@ if (window.CodeMirror) {
         }),
     },
   });
-  editor.getWrapperElement().setAttribute("aria-label", "Python 코드 편집기");
-  editor.getInputField().setAttribute("aria-label", "Python 코드 입력");
+  editor.getWrapperElement().setAttribute("aria-label", tr("ui_158"));
+  editor.getInputField().setAttribute("aria-label", tr("ui_159"));
   $(".code-wrap").classList.add("enhanced");
   editor.on("change", () => {
     if (settingEditor) return;
@@ -1065,12 +1081,21 @@ async function boot() {
     } catch {}
     setSource(source);
     await applyCode(true);
+    try {
+      const saved = JSON.parse(localStorage.getItem("factory-studio.replay.v1"));
+      if (saved?.source === S.source && saved.result?.schema_version === 2) {
+        S.result = saved.result; S.cursor = saved.cursor; S.tab = saved.tab || "events";
+        S.resultsFinal = saved.resultsFinal || false; S.resultFilters = saved.filters || {};
+        S.warnings = S.result.warnings; S.warningMessages = S.result.warning_messages || [];
+        seek(S.cursor); selectTab(S.tab);
+      }
+    } catch {}
     renderPlayback();
     renderTrace();
-    status("준비됨 · 예제 공장을 실행하거나 모델을 편집하세요.");
+    status({code: "ui_160"});
   } catch (e) {
-    status("서버 연결 실패");
-    toast(e.message);
+    status({code: "ui_161"});
+    toast(e.detail || e.message);
   }
 }
 boot();
@@ -1094,18 +1119,18 @@ function selectResult(row) {
   S.comparison = row.decision;
   seek(row.after, true);
   if (row.decision !== null) selectTab("allocations");
-  else toast(`${row.lot} · 미할당 · 선택 기록 없음 · 공정도 위치 표시`);
+  else toast({code: "unallocated_location", args: [row.lot]});
 }
 function renderAllocationResults() {
   const projection = allocationResults(S.result, S.cursor, S.resultsFinal, S.resultFilters);
   const {rows, time} = projection;
   const model = S.result.model;
-  const statuses = ["Push 배정 후 대기", "Pull 예약 후 대기", "출고 배정 후 대기", "이동 중", "처리 중", "처리 완료", "출고 완료", "미할당", "막힘"];
+  const statuses = [tr("ui_163"), tr("ui_164"), tr("ui_165"), tr("ui_29"), tr("ui_30"), tr("ui_166"), tr("ui_167"), tr("ui_168"), tr("ui_169")];
   const choices = {process: model.processes.map(p => p.id), line: model.machines.map(m => m.line),
     machine: ["INPUT", ...model.machines.map(m => m.id), "OUTPUT"], lot: S.result.events.filter(e => e.kind === "arrival").map(e => e.lot.id), status: statuses};
-  const names = {process: "공정", line: "라인", machine: "머신", lot: "로트", status: "상태"};
-  const filterHTML = Object.entries(choices).map(([key,values]) => `<label>${names[key]} <select data-result-filter="${key}"><option value="">전체</option>${[...new Set(values)].map(v => `<option value="${esc(v)}" ${S.resultFilters[key] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`).join("");
-  $("#trace-content").innerHTML = `<div class="allocation-results"><div class="result-controls"><label>보기 <select id="results-view"><option value="replay" ${!S.resultsFinal ? "selected" : ""}>현재 재생 시점</option><option value="final" ${S.resultsFinal ? "selected" : ""}>실행 최종 결과</option></select></label>${filterHTML}<label>로트 검색 <input id="result-search" value="${esc(S.resultFilters.search || "")}" type="search"></label><button id="result-reset">필터 초기화</button><button id="result-csv">표시 결과 CSV</button></div><p id="result-context">${S.resultsFinal ? "실행 최종 결과 · 재생 커서와 독립" : `현재 재생 시점 · 커서 ${S.cursor}`} · ${time} min · ${rows.length}행 · 필터 ${Object.values(S.resultFilters).some(Boolean) ? "적용" : "없음"}. 시간 단위: min. 빈 값은 미발생/해당 없음입니다. 완료 상태는 각 할당 방문의 상태입니다.</p><div class="result-table-wrap"><table id="result-table"><thead><tr>${allocationColumns.map(([name]) => `<th>${name}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i) => `<tr data-result-row="${i}">${allocationColumns.map(([,get],j) => `<td>${j === 0 ? `<button data-result-select="${i}">${esc(r.id || "미할당 위치")}</button>` : esc(get(r) ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>${rows.length ? "" : "<p>표시할 결과가 없습니다.</p>"}<h3>머신별 실제 시간 타임라인</h3><p>예약(노랑) · Push 배정 대기(회색) · 이동(파랑) · 실제 처리(초록). 각 할당은 별도 레인으로 표시합니다. 열린 구간은 표시 시점까지만 그리며 끝에 *를 표시합니다. 0분 구간도 선택할 수 있습니다.</p><div id="machine-timeline"></div></div>`;
+  const names = {process: tr("ui_89"), line: tr("ui_90"), machine: tr("ui_40"), lot: tr("ui_35"), status: tr("ui_37")};
+  const filterHTML = Object.entries(choices).map(([key,values]) => `<label>${names[key]} <select data-result-filter="${key}"><option value="">${tr("ui_170")}</option>${[...new Set(values)].map(v => `<option value="${esc(v)}" ${S.resultFilters[key] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`).join("");
+  $("#trace-content").innerHTML = `<div class="allocation-results"><div class="result-controls"><label>${tr("ui_171")} <select id="results-view"><option value="replay" ${!S.resultsFinal ? "selected" : ""}>${tr("ui_172")}</option><option value="final" ${S.resultsFinal ? "selected" : ""}>${tr("ui_173")}</option></select></label>${filterHTML}<label>${tr("ui_174")} <input id="result-search" value="${esc(S.resultFilters.search || "")}" type="search"></label><button id="result-reset">${tr("ui_175")}</button><button id="result-csv">${tr("ui_176")}</button></div><p id="result-context">${S.resultsFinal ? tr("ui_177") : `${tr("ui_178")} ${S.cursor}`} · ${time} min · ${rows.length}${tr("ui_179")} ${Object.values(S.resultFilters).some(Boolean) ? tr("ui_180") : tr("ui_181")}${tr("ui_182")}</p><div class="result-table-wrap"><table id="result-table"><thead><tr>${allocationColumns().map(([name]) => `<th>${name}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i) => `<tr data-result-row="${i}">${allocationColumns().map(([,get],j) => `<td>${j === 0 ? `<button data-result-select="${i}">${esc(r.id || tr("ui_183"))}</button>` : esc(typeof get(r) === "number" ? new Intl.NumberFormat(locale, {maximumFractionDigits: 6}).format(get(r)) : get(r) ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>${rows.length ? "" : `<p>${tr("ui_184")}</p>`}<h3>${tr("ui_185")}</h3><p>${tr("ui_186")}</p><div id="machine-timeline"></div></div>`;
   $("#results-view").onchange = e => {S.resultsFinal = e.target.value === "final"; renderTrace();};
   $$('[data-result-filter]').forEach(el => el.onchange = () => {S.resultFilters[el.dataset.resultFilter] = el.value; renderTrace();});
   $("#result-search").oninput = e => {
@@ -1115,9 +1140,9 @@ function renderAllocationResults() {
   };
   $("#result-reset").onclick = () => {S.resultFilters = {}; renderTrace();};
   $("#result-csv").onclick = () => download("factory_allocations.csv", allocationCSV(rows, {
-    "보기": S.resultsFinal ? "실행 최종 결과" : "현재 재생 시점", "표시 시각 (min)": time,
-    "재생 커서": S.resultsFinal ? S.result.events.length : S.cursor,
-    "필터": Object.values(S.resultFilters).some(Boolean) ? JSON.stringify(S.resultFilters) : "없음",
+    [tr("ui_171")]: S.resultsFinal ? tr("ui_173") : tr("ui_172"), [tr("ui_187")]: time,
+    [tr("ui_188")]: S.resultsFinal ? S.result.events.length : S.cursor,
+    [tr("ui_189")]: Object.values(S.resultFilters).some(Boolean) ? JSON.stringify(S.resultFilters) : tr("ui_181"),
   }), "text/csv;charset=utf-8");
   $$('[data-result-select]').forEach(el => el.onclick = () => selectResult(rows[Number(el.dataset.resultSelect)]));
   const axis = Math.max(time, 0.000001), width = 800, left = 180;
@@ -1128,22 +1153,65 @@ function renderAllocationResults() {
     body += `<text x="5" y="${y}">${esc(machine.process)} / ${esc(machine.line)} / ${esc(machine.id)}</text>`; y += 22;
     for (const {r,i} of lanes) {
       body += `<text x="5" y="${y+13}">${esc(r.id)} · ${esc(r.lot)}</text>`;
-      const spans = [[r.assigned, r.move, r.reservation ? "reserved" : "queued", r.reservation ? "예약" : "배정 대기"],
-        [r.move, r.arrived, "moving", "이동"], [r.start, r.finish, "processing", "실제 처리"]];
+      const spans = [[r.assigned, r.move, r.reservation ? "reserved" : "queued", r.reservation ? tr("ui_32") : tr("ui_190")],
+        [r.move, r.arrived, "moving", tr("ui_6")], [r.start, r.finish, "processing", tr("ui_191")]];
       // Reservation continues during transport; separate vertical strips preserve overlaps.
       if (r.reservation) spans[0][1] = r.start;
       spans.forEach(([start,end,kind,label],strip) => {
         if (start === null) return;
         const endTime = end ?? time;
-        body += `<g data-result-span="${i}" tabindex="0" role="button" aria-label="${esc(r.id)} ${label} ${start} ~ ${endTime}${end === null ? ' 진행 중' : ''} min"><title>${esc(r.id)} · ${label}: ${start} ~ ${endTime} min${end === null ? ' (진행 중)' : ''}</title><rect class="span-${kind}" x="${left + start/axis*width}" y="${y+strip*8}" width="${Math.max(2,(endTime-start)/axis*width)}" height="7"/>${end === null ? `<text x="${left + endTime/axis*width + 3}" y="${y+strip*8+8}">*</text>` : ""}</g>`;
+        body += `<g data-result-span="${i}" tabindex="0" role="button" aria-label="${esc(r.id)} ${label} ${start} ~ ${endTime}${end === null ? tr("ui_192") : ''} min"><title>${esc(r.id)} · ${label}: ${start} ~ ${endTime} min${end === null ? tr("ui_193") : ''}</title><rect class="span-${kind}" x="${left + start/axis*width}" y="${y+strip*8}" width="${Math.max(2,(endTime-start)/axis*width)}" height="7"/>${end === null ? `<text x="${left + endTime/axis*width + 3}" y="${y+strip*8+8}">*</text>` : ""}</g>`;
       });
       y += 32;
     }
   }
   const ticks = Array.from({length: 6}, (_,i) => `<line x1="${left+i*width/5}" x2="${left+i*width/5}" y1="22" y2="${y}" stroke="#e5e9e5"/><text x="${left+i*width/5}" y="15">${Number((time*i/5).toFixed(4))} min</text>`).join("");
-  $("#machine-timeline").innerHTML = `<svg width="1050" height="${y+10}" role="img" aria-label="머신별 실제 시뮬레이션 시간 축">${ticks}${body}</svg>`;
+  $("#machine-timeline").innerHTML = `<svg width="1050" height="${y+10}" role="img" aria-label="${tr("ui_194")}">${ticks}${body}</svg>`;
   $$('[data-result-span]').forEach(el => {
     el.onclick = () => selectResult(rows[Number(el.dataset.resultSpan)]);
     el.onkeydown = e => {if (["Enter", " "].includes(e.key)) {e.preventDefault(); el.onclick();}};
   });
 }
+
+function persistReplay() {
+  try {
+    if (S.result) localStorage.setItem("factory-studio.replay.v1", JSON.stringify({source: S.source, result: S.result, cursor: S.cursor, tab: S.tab, resultsFinal: S.resultsFinal, filters: S.resultFilters}));
+    else localStorage.removeItem("factory-studio.replay.v1");
+  } catch { /* Source saving remains independent when a large trace exceeds quota. */ }
+}
+window.addEventListener("pagehide", persistReplay);
+$("#language").onchange = () => {
+  const oldLocale = locale;
+  const translateOld = text => {
+    const key = Object.keys(translations[oldLocale]).find(k => translations[oldLocale][k] === text);
+    return key ? tr(key) : text;
+  };
+  const form = [...($$("#property-form input, #property-form select"))].map(el => ({name: el.name, value: el.value, checked: el.checked}));
+  const selected = copy(S.selected), cursor = S.cursor;
+  const cmCursor = editor?.getCursor();
+  const inspectorOpen = !$("#inspector").hidden;
+  locale = $("#language").value;
+  try { localStorage.setItem(localeKey, locale); } catch {}
+  if (S.resultFilters.status) S.resultFilters.status = translateOld(S.resultFilters.status);
+  translateStatic();
+  $("#project-name").textContent = S.model?.name || tr("ui_14");
+  $("#mode-label").textContent = tr(S.model?.mode === "push" ? "ui_16" : "ui_15");
+  $("#run-button").textContent = tr(S.job ? "ui_145" : "ui_152");
+  $("#status").textContent = displayMessage(S.statusMessage);
+  $("#toast").textContent = displayMessage(S.toastMessage);
+  diagnostics(localized(S.parseError, S.parseErrorDetail) || "");
+  renderTree(); renderGraph(); renderMetrics(); renderPlayback(); renderTrace();
+  if (inspectorOpen && selected) {
+    if (selected.type === "machine") inspectMachine(selected.id, !S.model.machines.some(m => m.id === selected.id));
+    if (selected.type === "route") inspectRoute(selected.id, !S.model.routes.some(m => m.id === selected.id));
+    if (selected.type === "process") inspectProcess(selected.id, !S.model.processes.some(m => m.id === selected.id));
+    if (selected.type === "settings") inspectSettings();
+    if (selected.type === "lot") inspectLot(selected.id);
+    if (selected.type === "event") { inspectEvent(selected.id); seek(cursor, true); }
+    form.forEach(value => { const el = $("#property-form [name='" + value.name + "']"); if (el) {el.value = value.value; el.checked = value.checked;} });
+  }
+  editor?.getWrapperElement().setAttribute("aria-label", tr("ui_158"));
+  editor?.getInputField().setAttribute("aria-label", tr("ui_159"));
+  if (cmCursor) editor.setCursor(cmCursor);
+  persistReplay();
+};
