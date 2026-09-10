@@ -126,9 +126,11 @@ def process_lot(env, machine, lot, context):
 
 ## 검증
 
-엔진, 동기화, API 테스트:
+엔진, 동기화, API 및 브라우저 JavaScript WIP 집계 테스트:
 
 ```bash
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m playwright install chromium
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
@@ -138,6 +140,7 @@ def process_lot(env, machine, lot, context):
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m playwright install chromium
 .venv/bin/python tests/browser_smoke.py
+.venv/bin/python tests/browser_inventory.py
 ```
 
 브라우저 테스트는 임시 포트의 서버를 자체 실행합니다. Linux에서 브라우저 시스템 라이브러리가 없으면 `python -m playwright install --with-deps chromium`을 사용하세요. 테스트 스크린샷은 `artifacts/`에 저장됩니다. GitHub Actions에서도 동일한 테스트를 실행합니다.
@@ -163,3 +166,7 @@ It supports Korean, English and Japanese, selection reasons, allocation comparis
 See [public demo deployment and recovery](docs/public-demo.md) for isolated build/testing,
 container operation and the proposed `factory.yshnote.com` ingress plan. This repository
 change alone does not establish that the external HTTPS deployment is live or accepted.
+
+## WIP 현황판
+
+실행 후 **WIP 현황판** 탭에서 현재 재생 이벤트까지의 로트를 공정·라인·위치별로 확인합니다. 최종 상태 보기는 재생 커서와 별도로 표시합니다. 필터·검색, 그룹/로트 선택에 따른 공정도 강조, 커서까지의 이력과 선택 이유, 표시 로트 CSV 내보내기를 지원합니다. 수량·출하 지시 시각이 모델에 없으면 값을 만들지 않습니다. 현재 추정 대기열과 향후 명시적 버퍼를 연결하는 계약 및 집계 기준은 [WIP projection](docs/inventory-projection.md)에 설명합니다.
