@@ -1,5 +1,6 @@
 """Local-only HTTP application. No build step or external frontend CDN."""
 import argparse
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -65,7 +66,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def allowed(self):
         port = self.server.server_port
-        hosts = {f'127.0.0.1:{port}', f'localhost:{port}'}
+        bind_host = self.server.server_address[0]
+        hosts = {f'127.0.0.1:{port}', f'localhost:{port}', f'{bind_host}:{port}'}
         origin = self.headers.get('Origin')
         return self.headers.get('Host') in hosts and (not origin or origin in {f'http://{host}' for host in hosts})
 
@@ -140,10 +142,17 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--host', default='127.0.0.1', help='바인딩할 IPv4 주소. 원격 접속 시 서버의 LAN IP를 지정하세요.')
     parser.add_argument('--port', type=int, default=8765)
     args = parser.parse_args()
-    server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
-    print(f'Factory Studio → http://127.0.0.1:{server.server_port}', flush=True)
+    try:
+        address = ipaddress.IPv4Address(args.host)
+        if address.is_unspecified:
+            parser.error('--host에는 0.0.0.0 대신 접속에 사용할 실제 IPv4 주소를 지정하세요.')
+    except ipaddress.AddressValueError:
+        parser.error('--host에는 유효한 IPv4 주소를 지정하세요.')
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    print(f'Factory Studio → http://{args.host}:{server.server_port}', flush=True)
     print('로컬 Python 코드를 현재 사용자 권한으로 실행합니다. 신뢰하는 프로젝트를 여세요.', flush=True)
     try:
         server.serve_forever()
