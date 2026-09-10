@@ -1414,3 +1414,12 @@ dialog li {
 .order-editor textarea { width:100%; font-family:monospace; }
 .order-editor label { display:block; }
 @media(max-width:650px){.order-controls label { flex:1 1 130px; }.order-controls button { min-height:44px; }}
+
+.data-panel { min-width:0; max-width:100%; overflow-wrap:anywhere; }
+.data-controls,.data-mapping { display:flex; flex-wrap:wrap; gap:10px; align-items:end; margin:12px 0; }
+.data-controls label,.data-mapping label { display:flex; flex-direction:column; gap:4px; min-width:0; max-width:100%; }
+.data-controls :is(input,select),.data-mapping select { min-width:0; max-width:100%; padding:7px; }
+.data-scroll { max-width:100%; overflow:auto; border:1px solid #d9e3d9; margin:12px 0; }
+.data-scroll table { width:100%; white-space:nowrap; }.data-scroll caption { padding:10px; text-align:start; }
+.data-panel button { min-height:36px; }.data-panel [role="alert"] { color:#a23b2f; }
+@media(max-width:650px){.data-controls label,.data-mapping label { flex:1 1 130px; }.data-panel button { min-height:44px; }}
