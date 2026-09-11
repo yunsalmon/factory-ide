@@ -27,6 +27,31 @@ class ApiTests(unittest.TestCase):
         cls.server.server_close()
         cls.thread.join()
 
+    def test_versioned_experiment_runtime_route(self):
+        from scripts.fetch_browser_runtime import PYODIDE_VERSION
+        cached = Path(__file__).resolve().parents[1] / '.cache/browser-runtime/pyodide.js'
+        if not cached.is_file():
+            self.skipTest('runtime cache unavailable')
+        with urllib.request.urlopen(self.base + f'/vendor/pyodide/{PYODIDE_VERSION}/pyodide.js') as response:
+            self.assertEqual(response.read(), cached.read_bytes())
+        for path in ['/vendor/pyodide/0.0.0/pyodide.js', '/vendor/pyodide/0.27.7/../server.py']:
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(self.base + path)
+            self.assertEqual(error.exception.code, 404)
+
+    def test_worker_only_wasm_policy_and_runtime_allowlist(self):
+        for path in ['/', '/app.js']:
+            with urllib.request.urlopen(self.base + path) as response:
+                self.assertNotIn("unsafe-eval", response.headers['Content-Security-Policy'])
+        with urllib.request.urlopen(self.base + '/browser-worker.js') as response:
+            self.assertIn("wasm-unsafe-eval", response.headers['Content-Security-Policy'])
+        with urllib.request.urlopen(self.base + '/runtime/model.py') as response:
+            self.assertIn(b'def synchronize', response.read())
+        for path in ['/runtime/server.py','/vendor/pyodide/../../server.py']:
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(self.base + path)
+            self.assertEqual(error.exception.code,404)
+
     def request(self, path, body=None, headers=None, token=True):
         request_headers = {'Content-Type': 'application/json'}
         if token:

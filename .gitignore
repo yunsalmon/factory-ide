@@ -2,6 +2,7 @@
 __pycache__/
 .pytest_cache/
 artifacts/
+.cache/
 *.pyc
 .DS_Store
 

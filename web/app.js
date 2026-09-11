@@ -31,7 +31,11 @@ const S = {
   statusMessage: null,
   toastMessage: null,
   example: "",
+  demoResult: null,
+  demoVersion: null,
   busy: false,
+  runtimeState: "idle",
+  runtimeErrorLine: null,
 };
 let parseTimer,
   playTimer,
@@ -41,7 +45,12 @@ let parseTimer,
   editor = null,
   settingEditor = false,
   errorLine = null;
+const browserRuntime = PUBLIC_DEMO
+  ? new BrowserPythonRuntime({onState: (state, runtime) => renderRuntimeState(state, runtime)})
+  : null;
 const kinds = {
+  get machine_state() { return tr("order_machine_state"); },
+  get order_release() { return tr("order_actual_release"); },
   get arrival() { return tr("ui_1"); },
   get ready() { return tr("ui_2"); },
   get decision() { return tr("ui_3"); },
@@ -78,6 +87,30 @@ function status(message) {
   S.statusMessage = message;
   $("#status").textContent = displayMessage(message);
 }
+function renderRuntimeState(state, runtime) {
+  S.runtimeState = state;
+  const labels = {
+    idle: "public_runtime_idle",
+    loading: "public_runtime_loading",
+    checking: "public_runtime_checking",
+    ready: "public_runtime_ready",
+    running: "public_runtime_running",
+    stopped: "public_runtime_stopped",
+    init_error: "public_init_error",
+  };
+  if (!S.job) $("#run-button").textContent = tr(state === "loading" ? "ui_145" : "ui_152");
+  $("#runtime-status").textContent = runtime
+    ? `${tr(labels[state] || "public_runtime_ready")} · Python ${runtime.python} · SimPy ${runtime.simpy}`
+    : tr(labels[state] || "public_runtime_idle");
+}
+function markErrorLine(line) {
+  if (editor && errorLine !== null) editor.removeLineClass(errorLine, "background", "code-error-line");
+  errorLine = null;
+  if (editor && Number.isInteger(Number(line)) && Number(line) > 0) {
+    errorLine = Number(line) - 1;
+    editor.addLineClass(errorLine, "background", "code-error-line");
+  }
+}
 function diagnostics(error = "") {
   if (!error) S.parseErrorDetail = null;
   $("#sync-status").textContent = error
@@ -85,21 +118,14 @@ function diagnostics(error = "") {
     : tr("ui_12");
   $("#sync-status").className = error ? "error" : "good";
   S.parseError = error;
-  if (editor && errorLine !== null) {
-    editor.removeLineClass(errorLine, "background", "code-error-line");
-    errorLine = null;
-  }
-  const line = S.parseErrorDetail?.code === "message_22" ? Number(S.parseErrorDetail.args[0]) : null;
-  if (editor && Number.isInteger(line) && line > 0) {
-    errorLine = line - 1;
-    editor.addLineClass(errorLine, "background", "code-error-line");
-  }
+  const line = S.runtimeErrorLine || (S.parseErrorDetail?.code === "message_22" ? Number(S.parseErrorDetail.args[0]) : null);
+  markErrorLine(line);
   $("#diagnostic-count").textContent = (error ? 1 : 0) + S.warnings.length || "";
   if (S.tab === "console") renderTrace();
 }
 function persist() {
   try {
-    localStorage.setItem("factory-studio.source.v1", S.source);
+    localStorage.setItem(PUBLIC_DEMO ? "factory-studio.public.source.v1" : "factory-studio.source.v1", S.source);
   } catch {
     status({code: "ui_13"});
   }
@@ -150,17 +176,17 @@ function invalidateTrace() {
   renderGraph();
 }
 async function applyCode(silent = false) {
-  if (PUBLIC_DEMO) return toast({code: "public_scope"});
   clearTimeout(parseTimer);
   const revision = S.revision,
     source = S.source;
   try {
-    const data = await api("/api/parse", { source });
+    const data = PUBLIC_DEMO ? await browserRuntime.parse(source) : await api("/api/parse", { source });
     if (revision !== S.revision) return false;
     S.model = data.model;
     S.warnings = data.warnings;
     S.warningMessages = data.warning_messages || [];
     S.valid = true;
+    S.runtimeErrorLine = null;
     diagnostics();
     renderTree();
     renderGraph();
@@ -172,12 +198,12 @@ async function applyCode(silent = false) {
   } catch (e) {
     if (revision !== S.revision) return false;
     S.valid = false;
-    S.parseErrorDetail = e.detail;
-    diagnostics(e.message);
+    S.parseErrorDetail = e.code === "browser_init_error" ? {code: "public_init_error"} : e.code === "browser_init_timeout" ? {code: "public_init_timeout"} : e.detail || e.error_message;
+    diagnostics(localized(e.message, S.parseErrorDetail));
     status({code: "ui_18"});
     if (!silent) {
       selectTab("console");
-      toast(e.detail || e.message);
+      toast(S.parseErrorDetail || e.message);
     }
     return false;
   }
@@ -191,7 +217,7 @@ async function mutate(change) {
   change(model);
   S.busy = true;
   try {
-    const data = await api("/api/sync", { source: S.source, model });
+    const data = PUBLIC_DEMO ? await browserRuntime.sync(S.source, model) : await api("/api/sync", { source: S.source, model });
     if (revision !== S.revision)
       throw new Error(tr("ui_21"));
     invalidateTrace();
@@ -240,7 +266,7 @@ function stateAt(cursor = S.cursor) {
   const lots = {}, machines = {};
   for (const m of S.result?.model.machines || []) machines[m.id] = {state: "idle", lot: null};
   for (const e of S.result?.events.slice(0, cursor) || []) {
-    Object.assign(lots, copy(e.state_changes?.lots || {[e.lot.id]: e.lot}));
+    Object.assign(lots, copy(e.state_changes?.lots || (e.lot ? {[e.lot.id]: e.lot} : {})));
     Object.assign(machines, copy(e.state_changes?.machines || {}));
   }
   const queues = {};
@@ -253,7 +279,7 @@ function stateAt(cursor = S.cursor) {
 function renderAllocationComparison() {
   const records = S.result.events.filter(e => ["decision", "blocked"].includes(e.kind));
   const current = records.find(e => e.index === S.comparison);
-  const select = `<label>${tr("ui_23")} <select id="allocation-select" aria-label="${tr("ui_24")}"><option value="">${tr("ui_25")}</option>${records.map(e => `<option value="${e.index}" ${e === current ? "selected" : ""}>#${e.index} · ${fmt(e.time)}m · ${esc(e.allocation_id || (e.kind === "blocked" ? tr("ui_10") : e.outcome === "route_preference" ? tr("ui_26") : tr("ui_27")))} · ${esc(e.lot.id)}</option>`).join("")}</select></label>`;
+  const select = `<label>${tr("ui_23")} <select id="allocation-select" aria-label="${tr("ui_24")}"><option value="">${tr("ui_25")}</option>${records.map(e => `<option value="${e.index}" ${e === current ? "selected" : ""}>#${e.index} · ${fmt(e.time)}m · ${esc(e.allocation_id || (e.kind === "blocked" ? tr("ui_10") : e.outcome === "route_preference" ? tr("ui_26") : tr("ui_27")))} · ${esc(e.lot?.id || "—")}</option>`).join("")}</select></label>`;
   const container = $("#trace-content");
   container.innerHTML = `<div class="allocation-comparison">${select}<div id="allocation-detail"></div></div>`;
   $("#allocation-select").onchange = e => {
@@ -311,12 +337,12 @@ function renderGraph() {
   const { positions, groups, rows, width, height } = graphLayout();
   if (autoFit)
     S.zoom = Math.min(1.15, Math.max(0.38, ($("#graph-viewport").clientWidth - 12) / width));
-  const { lots, machines } = stateAt(),
+  const { lots, machines } = stateAt(S.tab === "wip" && WIP.finalView ? S.result?.events.length : S.cursor),
     active = S.result?.events[S.cursor - 1];
   const routeHistory = new Set(
     S.lot
       ? (S.result?.events.slice(0, S.cursor) || [])
-          .filter((e) => e.lot.id === S.lot && e.kind === "move")
+          .filter((e) => e.lot?.id === S.lot && e.kind === "move")
           .map((e) => e.route)
       : [],
   );
@@ -349,7 +375,7 @@ function renderGraph() {
   for (const terminal of ["INPUT", "OUTPUT"]) {
     const p = positions[terminal],
       count = Object.values(lots).filter((l) => l.location === terminal).length;
-    svg += `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="8" class="graph-terminal"/><text x="${p.x + p.w / 2}" y="${p.y + 17}" text-anchor="middle" class="terminal-text">${terminal}</text><text x="${p.x + p.w / 2}" y="${p.y + 31}" text-anchor="middle" class="terminal-text">${count} lots</text>`;
+    svg += `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="8" class="graph-terminal" data-terminal="${terminal}"/><text x="${p.x + p.w / 2}" y="${p.y + 17}" text-anchor="middle" class="terminal-text">${terminal}</text><text x="${p.x + p.w / 2}" y="${p.y + 31}" text-anchor="middle" class="terminal-text">${count} lots</text>`;
   }
   for (const m of S.model.machines) {
     const p = positions[m.id],
@@ -363,6 +389,7 @@ function renderGraph() {
   svg += "</svg>";
   $("#graph").innerHTML = svg;
   $("#zoom-label").textContent = Math.round(S.zoom * 100) + "%";
+  highlightWipGraph();
   $$("[data-node]").forEach((g) => {
     g.onclick = () => inspectMachine(g.dataset.node);
     g.onkeydown = (e) => {
@@ -399,6 +426,7 @@ function renderPlayback() {
 }
 function selectTab(tab) {
   S.tab = tab;
+  renderGraph();
   $$("[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   renderTrace();
 }
@@ -409,11 +437,17 @@ function renderTrace() {
     container.innerHTML = `<pre class="console ${S.parseError ? "error" : ""}">${esc([S.parseError, ...S.warnings.map((w,i) => localized(w, S.warningMessages?.[i])), S.console, displayMessage(S.runtimeError)].filter(Boolean).join("\n\n") || tr("ui_67"))}</pre>`;
     return;
   }
+  if (S.tab === "experiments") { renderExperiments(); return; }
+  if (S.tab === "scenarios") { renderScenarios(); return; }
+  if (S.tab === "data") { renderDataPanel(); return; }
+  if (S.tab === "orders") { renderPlanner(); return; }
+  if (S.tab === "operations") { renderOperations(); return; }
   if (!S.result) {
     container.innerHTML =
       `<div class="empty"><b>${tr("ui_68")}</b>${tr("ui_69")}<br>${tr("ui_70")}</div>`;
     return;
   }
+  if (S.tab === "wip") { renderInventory(); return; }
   if (S.tab === "results") { renderAllocationResults(); return; }
   if (S.tab === "allocations") { renderAllocationComparison(); return; }
   if (S.tab === "utilization") {
@@ -445,14 +479,14 @@ function renderTrace() {
     return;
   }
   const filtered = events
-    .filter((e) => !S.lot || e.lot.id === S.lot)
+    .filter((e) => !S.lot || e.lot?.id === S.lot)
     .slice(-150)
     .reverse();
   container.innerHTML =
     (S.lot
       ? `<div class="lot-filter">${esc(S.lot)} ${tr("ui_75")}<button id="clear-lot">${tr("ui_76")}</button></div>`
       : "") +
-    `<table><thead><tr><th>${tr("event_time")}</th><th>${tr("event_lot")}</th><th>${tr("event_kind")}</th><th>${tr("event_location")}</th><th>${tr("event_detail")}</th></tr></thead><tbody>${filtered.map((e) => `<tr class="clickable ${e.index === S.cursor - 1 ? "current" : ""}" data-event="${e.index}"><td class="mono">${fmt(e.time)}</td><td class="mono">${esc(e.lot.id)}</td><td><span class="kind ${e.kind}">${kinds[e.kind] || esc(e.kind)}</span></td><td>${esc(e.machine || e.lot.location)}</td><td>${esc(e.kind === "decision" ? localized(e.reason, e.reason_message) : e.kind === "move" ? `${e.lot.location} → ${e.lot.target}` : e.kind === "start" ? (e.duration === null ? tr("ui_77") : `${tr("ui_78")} ${fmt(e.duration)} min`) : localized(e.reason, e.reason_message) || e.route || "—")}</td></tr>`).join("")}</tbody></table>`;
+    `<table><thead><tr><th>${tr("event_time")}</th><th>${tr("event_lot")}</th><th>${tr("event_kind")}</th><th>${tr("event_location")}</th><th>${tr("event_detail")}</th></tr></thead><tbody>${filtered.map((e) => `<tr class="clickable ${e.index === S.cursor - 1 ? "current" : ""}" data-event="${e.index}"><td class="mono">${fmt(e.time)}</td><td class="mono">${esc(e.lot?.id || "—")}</td><td><span class="kind ${e.kind}">${kinds[e.kind] || esc(e.kind)}</span></td><td>${esc(e.machine || e.lot?.location || "—")}</td><td>${esc(e.kind === "decision" ? localized(e.reason, e.reason_message) : e.kind === "move" ? `${e.lot.location} → ${e.lot.target}` : e.kind === "start" ? (e.duration === null ? tr("ui_77") : `${tr("ui_78")} ${fmt(e.duration)} min`) : localized(e.reason, e.reason_message) || e.route || "—")}</td></tr>`).join("")}</tbody></table>`;
   $$("[data-event]").forEach((r) => (r.onclick = () => inspectEvent(Number(r.dataset.event))));
   if ($("#clear-lot"))
     $("#clear-lot").onclick = () => {
@@ -570,7 +604,7 @@ function locate(id) {
   updateEditor();
 }
 function inspectMachine(id, newMachine = false) {
-  if (PUBLIC_DEMO) return toast({code: "public_scope"});
+  if (PUBLIC_DEMO && newMachine) return toast({code: "public_scope"});
   const m = newMachine
     ? { id, name: tr("ui_84"), process: S.model.processes[0].id, line: "A", time: 5 }
     : S.model.machines.find((m) => m.id === id);
@@ -583,7 +617,7 @@ function inspectMachine(id, newMachine = false) {
       "process",
       m.process,
       S.model.processes.map((p) => [p.id, p.name]),
-    )}${field(tr("ui_90"), "line", m.line, "text", "required")}${field(tr("ui_91"), "time", m.time, "number", 'min="0.01" step="any" required')}${actions(!newMachine)}</form>${!newMachine ? `<button id="locate-code" class="quiet" style="margin-top:15px">${tr("ui_92")}</button>` : ""}`,
+    )}${field(tr("ui_90"), "line", m.line, "text", "required")}${field(tr("ui_91"), "time", m.time, "number", 'min="0.01" step="any" required')}${actions(!newMachine && !PUBLIC_DEMO)}</form>${!newMachine ? `<button id="locate-code" class="quiet" style="margin-top:15px">${tr("ui_92")}</button>` : ""}`,
   );
   bindForm(async (f) => {
     const machine = {
@@ -605,7 +639,7 @@ function inspectMachine(id, newMachine = false) {
   });
   if (!newMachine) {
     $("#locate-code").onclick = () => locate(id);
-    $("#delete-item").onclick = async () => {
+    if (!PUBLIC_DEMO) $("#delete-item").onclick = async () => {
       try {
         await mutate((model) => {
           model.machines = model.machines.filter((m) => m.id !== id);
@@ -744,7 +778,14 @@ function inspectEvent(index) {
   pause();
   S.selected = { type: "event", id: index };
   seek(index + 1);
-  let html = `<span class="info-tag">${esc(kinds[e.kind])} · ${fmt(e.time)} min</span><h3 style="margin-top:13px">${esc(e.lot.id)} <span class="subtle">${tr("ui_72")} ${esc(e.lot.product)}</span></h3><button id="track-lot" class="quiet">${tr("ui_121")}</button>`;
+  if (!e.lot) {
+    const transition=e.transition;
+    const label=state=>translations[locale]?.["order_"+state] ? tr("order_"+state) : state;
+    openInspector(tr("order_machine_state"), `<h3>${esc(e.machine)}</h3><p>${fmt(e.time)} min</p><p>${esc(label(transition?.previous.state))} → ${esc(label(transition?.current.state))}</p><p>${esc(transition?.current.cause||"")}</p>`);
+    renderGraph();
+    return;
+  }
+  let html = `<span class="info-tag">${esc(kinds[e.kind])} · ${fmt(e.time)} min</span><h3 style="margin-top:13px">${esc(e.lot?.id || "—")} <span class="subtle">${tr("ui_72")} ${esc(e.lot.product)}</span></h3><button id="track-lot" class="quiet">${tr("ui_121")}</button>`;
   if (e.kind === "decision") {
     html += `<div class="info-card selected"><b>${tr("ui_122")}</b>${esc(localized(e.reason, e.reason_message))}<small>${e.decision_mode === "pull" && e.machine ? `${esc(e.machine)}${tr("ui_123")}` : tr("ui_124")}</small></div><h3>${tr("ui_125")} ${e.candidates.length}${tr("ui_126")}</h3>`;
     for (const c of e.candidates)
@@ -767,7 +808,7 @@ function inspectEvent(index) {
 function inspectLot(id, refresh = true) {
   S.lot = id;
   S.selected = { type: "lot", id };
-  const events = (S.result?.events.slice(0, S.cursor) || []).filter((e) => e.lot.id === id);
+  const events = (S.result?.events.slice(0, S.cursor) || []).filter((e) => e.lot?.id === id);
   openInspector(
     tr("ui_141"),
     `<h3>${esc(id)}</h3><p>${tr("ui_142")}</p>${
@@ -792,20 +833,29 @@ function inspectLot(id, refresh = true) {
   }
 }
 async function run() {
-  if (PUBLIC_DEMO) return toast({code: "public_scope"});
-  if (S.job) {
+  if (S.job || (PUBLIC_DEMO && browserRuntime.state === "loading")) {
     await cancelRun();
     return;
   }
   if (S.busy) return;
+  const ticket = ++runSerial,
+    browserJobId = PUBLIC_DEMO ? `browser-${ticket}` : null;
   S.busy = true;
+  if (browserJobId) {
+    S.job = browserJobId;
+    $("#run-button").textContent = tr("ui_145");
+  }
   if (!(await applyCode())) {
+    if (ticket === runSerial) {
+      S.job = null;
+      $("#run-button").textContent = tr("ui_152");
+    }
     S.busy = false;
     return;
   }
   const source = S.source,
-    revision = S.revision,
-    ticket = ++runSerial;
+    revision = S.revision;
+  if (ticket !== runSerial) return;
   S.busy = true;
   S.runtimeError = null;
   S.console = "";
@@ -813,21 +863,28 @@ async function run() {
   status({code: "ui_144"});
   $("#run-button").textContent = tr("ui_145");
   try {
-    const { job_id } = await api("/api/run", { source });
-    S.job = job_id;
-    S.busy = false;
-    let job;
-    do {
-      await new Promise((r) => setTimeout(r, 120));
+    let p;
+    if (PUBLIC_DEMO) {
+      S.busy = false;
+      p = await browserRuntime.run(source);
+      if (S.job !== browserJobId) return;
+    } else {
+      const { job_id } = await api("/api/run", { source });
+      S.job = job_id;
+      S.busy = false;
+      let job;
+      do {
+        await new Promise((r) => setTimeout(r, 120));
+        if (S.job !== job_id) return;
+        job = await api("/api/jobs/" + job_id);
+      } while (job.status === "running");
       if (S.job !== job_id) return;
-      job = await api("/api/jobs/" + job_id);
-    } while (job.status === "running");
-    if (S.job !== job_id) return;
-    if (job.status === "cancelled") {
-      status({code: "ui_146"});
-      return;
+      if (job.status === "cancelled") {
+        status({code: "ui_146"});
+        return;
+      }
+      p = job.payload;
     }
-    const p = job.payload;
     S.console = (p.result?.console || p.console || "") + (p.traceback ? "\n" + p.traceback : "");
     if (!p.ok) throw Object.assign(new Error(localized(p.error, p.error_message)), {detail: p.error_message});
     if (S.revision !== revision) {
@@ -835,22 +892,38 @@ async function run() {
       status({code: "ui_148"});
       return;
     }
+    if (PUBLIC_DEMO) {
+      const sourceHash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source)))]
+        .map((value) => value.toString(16).padStart(2, "0")).join("");
+      p.result.execution = {
+        kind: "browser",
+        source_sha256: sourceHash,
+        source_revision: S.demoVersion.source_revision,
+        runtime: copy(browserRuntime.runtime),
+      };
+    }
     S.result = p.result;
     S.warnings = p.result.warnings;
     S.warningMessages = p.result.warning_messages || [];
     S.cursor = 0;
     S.lot = null;
     S.selected = null;
+    S.runtimeErrorLine = null;
     $("#inspector").hidden = true;
     diagnostics();
     selectTab("events");
     seek(Math.min(S.result.events.length, 1));
     status({code: "run_complete", args: [S.result.events.length]});
+    persistReplay();
     play();
   } catch (e) {
-    S.runtimeError = e.detail || e.message;
+    if (ticket !== runSerial) return;
+    S.console = (e.console || S.console || "") + (e.traceback ? "\n" + e.traceback : "");
+    S.runtimeError = e.code === "browser_init_error" ? {code: "public_init_error"} : e.code === "browser_init_timeout" ? {code: "public_init_timeout"} : e.code === "browser_timeout" ? {code: "public_timeout"} : e.detail || e.error_message || e.message;
+    S.runtimeErrorLine = e.line || null;
+    markErrorLine(S.runtimeErrorLine);
     selectTab("console");
-    toast(e.detail || e.message);
+    toast(S.runtimeError);
     status({code: "ui_151"});
   } finally {
     if (ticket === runSerial) {
@@ -862,8 +935,13 @@ async function run() {
 }
 async function cancelRun() {
   const id = S.job;
-  if (!id) return;
-  await api("/api/cancel", { job_id: id });
+  if (!id && !(PUBLIC_DEMO && browserRuntime.state === "loading")) return;
+  if (PUBLIC_DEMO) {
+    ++S.revision;
+    clearTimeout(parseTimer);
+    browserRuntime.stop();
+  }
+  else await api("/api/cancel", { job_id: id });
   ++runSerial;
   S.job = null;
   S.busy = false;
@@ -892,6 +970,8 @@ $("#code").addEventListener("input", () => {
   S.source = $("#code").value;
   S.revision++;
   S.valid = false;
+  S.runtimeError = null;
+  S.runtimeErrorLine = null;
   persist();
   updateEditor();
   invalidateTrace();
@@ -914,6 +994,27 @@ $("#code").addEventListener("keydown", (e) => {
 $("#apply-code").onclick = () => applyCode();
 $("#run-button").onclick = run;
 $("#save-button").onclick = save;
+$("#reset-button").onclick = async () => {
+  if (!PUBLIC_DEMO) return;
+  if (S.job) await cancelRun();
+  browserRuntime.stop();
+  pause();
+  setSource(S.example);
+  S.result = copy(S.demoResult);
+  S.model = S.result.model;
+  S.warnings = S.result.warnings;
+  S.warningMessages = S.result.warning_messages || [];
+  S.runtimeError = null;
+  S.runtimeErrorLine = null;
+  S.console = S.result.console || "";
+  S.valid = true;
+  try {
+    localStorage.removeItem("factory-studio.public.source.v1");
+    localStorage.removeItem("factory-studio.public.replay.v1");
+  } catch {}
+  diagnostics(); renderTree(); renderGraph(); seek(1); selectTab("events");
+  status({code: "public_reset_done"});
+};
 $("#settings-button").onclick = inspectSettings;
 $("#close-inspector").onclick = closeInspector;
 $("#add-machine").onclick = () => S.model && inspectMachine(nextId("M", S.model.machines), true);
@@ -971,7 +1072,8 @@ $("#file-input").onchange = async (e) => {
   try {
     if (file.size > 1_000_000) throw new Error(tr("ui_156"));
     const source = await file.text();
-    await api("/api/parse", { source });
+    if (PUBLIC_DEMO) await browserRuntime.parse(source);
+    else await api("/api/parse", { source });
     if (S.job) await cancelRun();
     invalidateTrace();
     setSource(source);
@@ -1084,20 +1186,41 @@ async function boot() {
       const response = await fetch("/demo.json");
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
-      S.source = S.example = data.source;
-      setSource(data.source);
-      editor?.setOption("readOnly", true);
-      $("#code").readOnly = true;
-      S.model = data.result.model; S.result = data.result; S.valid = true;
+      S.example = data.source;
+      S.demoResult = copy(data.result);
+      S.demoVersion = data.version;
+      let restoredPublicReplay = false;
+      let source = data.source;
+      try { source = localStorage.getItem("factory-studio.public.source.v1") || source; } catch {}
+      setSource(source);
+      S.model = data.result.model; S.result = source === data.source ? copy(data.result) : null; S.valid = source === data.source;
       S.warnings = data.result.warnings; S.warningMessages = data.result.warning_messages;
-      $("#demo-version").textContent = `${data.version.source_revision} · trace v${data.result.schema_version} · ${data.version.trace_sha256}`;
+      const runtime = data.version.browser_runtime;
+      $("#demo-version").textContent = `${data.version.source_revision} · trace v${data.result.schema_version} · Pyodide ${runtime.pyodide} · Python ${runtime.python} · SimPy ${runtime.simpy} · ${data.version.trace_sha256}`;
+      if (source !== data.source) {
+        await applyCode(true);
+      }
+      try {
+        const saved = JSON.parse(localStorage.getItem("factory-studio.public.replay.v1"));
+        if (saved?.source === source && saved.result?.schema_version === 2) {
+          S.model = saved.result.model; S.result = saved.result; S.valid = true;
+          S.cursor = Number.isInteger(saved.cursor) && saved.cursor >= 0 && saved.cursor <= S.result.events.length ? saved.cursor : 1;
+          S.tab = saved.tab || "events";
+          S.resultsFinal = saved.resultsFinal || false; S.resultFilters = saved.filters || {};
+          S.warnings = S.result.warnings; S.warningMessages = S.result.warning_messages || [];
+          restoredPublicReplay = true;
+        }
+      } catch {}
       $("#project-name").textContent = S.model.name;
-      diagnostics(); renderTree(); renderGraph(); seek(1); selectTab("events");
+      diagnostics(); renderTree(); renderGraph();
+      seek(S.result ? (restoredPublicReplay ? S.cursor : 1) : 0);
+      selectTab(S.result ? S.tab : "console");
       status({code: "public_ready"});
       return;
     }
     const data = await api("/api/bootstrap");
     S.token = data.token;
+    S.localRuntime = data.runtime;
     S.example = data.source;
     let source = data.source;
     try {
@@ -1132,6 +1255,8 @@ window.factoryStudio = {
     valid: S.valid,
     playing: S.playing,
     job: S.job,
+    runtimeState: S.runtimeState,
+    result: copy(S.result),
   }),
   pause,
 };
@@ -1198,10 +1323,10 @@ function renderAllocationResults() {
 }
 
 function persistReplay() {
-  if (PUBLIC_DEMO) return;
   try {
-    if (S.result) localStorage.setItem("factory-studio.replay.v1", JSON.stringify({source: S.source, result: S.result, cursor: S.cursor, tab: S.tab, resultsFinal: S.resultsFinal, filters: S.resultFilters}));
-    else localStorage.removeItem("factory-studio.replay.v1");
+    const key = PUBLIC_DEMO ? "factory-studio.public.replay.v1" : "factory-studio.replay.v1";
+    if (S.result) localStorage.setItem(key, JSON.stringify({source: S.source, result: S.result, cursor: S.cursor, tab: S.tab, resultsFinal: S.resultsFinal, filters: S.resultFilters}));
+    else localStorage.removeItem(key);
   } catch { /* Source saving remains independent when a large trace exceeds quota. */ }
 }
 window.addEventListener("pagehide", persistReplay);
@@ -1222,6 +1347,7 @@ $("#language").onchange = () => {
   $("#project-name").textContent = S.model?.name || tr("ui_14");
   $("#mode-label").textContent = tr(S.model?.mode === "push" ? "ui_16" : "ui_15");
   $("#run-button").textContent = tr(S.job ? "ui_145" : "ui_152");
+  if (PUBLIC_DEMO) renderRuntimeState(S.runtimeState, browserRuntime.runtime);
   $("#status").textContent = displayMessage(S.statusMessage);
   $("#toast").textContent = displayMessage(S.toastMessage);
   diagnostics(localized(S.parseError, S.parseErrorDetail) || "");
@@ -1235,6 +1361,7 @@ $("#language").onchange = () => {
     if (selected.type === "event") { inspectEvent(selected.id); seek(cursor, true); }
     form.forEach(value => { const el = $("#property-form [name='" + value.name + "']"); if (el) {el.value = value.value; el.checked = value.checked;} });
   }
+  refreshOperationLocale();
   editor?.getWrapperElement().setAttribute("aria-label", tr("ui_158"));
   editor?.getInputField().setAttribute("aria-label", tr("ui_159"));
   if (cmCursor) editor.setCursor(cmCursor);

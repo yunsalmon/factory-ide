@@ -19,6 +19,18 @@
     <script src="/locales.js" defer></script>
     <script src="/i18n.js" defer></script>
     <script src="/allocation-results.js" defer></script>
+    <script src="/inventory-projection.js" defer></script>
+    <script src="/inventory-ui.js" defer></script>
+    <script src="/browser-runtime.js" defer></script>
+    <script src="/order-projection.js" defer></script>
+    <script src="/order-ui.js" defer></script>
+    <script src="/operations.js" defer></script>
+    <script src="/scenario-comparison.js" defer></script>
+    <script src="/scenario-ui.js" defer></script>
+    <script src="/data-core.js" defer></script>
+    <script src="/data-ui.js" defer></script>
+    <script src="/experiment-core.js" defer></script>
+    <script src="/experiment-ui.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -37,6 +49,7 @@
         <button id="help-button" class="quiet"><span data-i18n="ui_208">사용 가이드</span></button
         ><button id="import-button" class="quiet"><span data-i18n="ui_209">열기</span></button
         ><button id="save-button"><span data-i18n="ui_210">↓ Python 저장</span></button
+        ><button id="reset-button"><span data-i18n="public_reset">예제로 초기화</span></button
         ><button id="run-button" class="primary"><span data-i18n="ui_152">▶ 시뮬레이션 실행</span></button>
       </nav>
     </header>
@@ -143,9 +156,15 @@
             <div class="tabs">
               <button class="active" data-tab="events"><span data-i18n="ui_233">
                 이벤트 기록 </span><span id="event-count">0</span></button
+              ><button data-tab="wip"><span data-i18n="wip_title">WIP</span></button
+              ><button data-tab="scenarios"><span data-i18n="sc_title">Scenarios</span></button
+              ><button data-tab="data"><span data-i18n="data_title">Data import &amp; calibration</span></button
+              ><button data-tab="experiments"><span data-i18n="ex_title">Experiments</span></button
+              ><button data-tab="orders"><span data-i18n="order_title">Orders</span></button
               ><button data-tab="results"><span data-i18n="ui_234">전체 할당 결과</span></button
               ><button data-tab="allocations"><span data-i18n="ui_139">할당 전후 비교</span></button
               ><button data-tab="lots"><span data-i18n="ui_235">로트 추적</span></button
+              ><button data-tab="operations"><span data-i18n="ops_title">설비 운영</span></button
               ><button data-tab="utilization"><span data-i18n="ui_236">머신 가동률</span></button
               ><button data-tab="console"><span data-i18n="ui_237">콘솔 / 진단 </span><span id="diagnostic-count"></span></button>
             </div>
