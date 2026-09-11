@@ -62,6 +62,53 @@ const kinds = {
   get complete() { return tr("ui_9"); },
   get blocked() { return tr("ui_10"); },
 };
+// One formatter covers every lot and machine state currently emitted by the
+// trace contract. A future state remains visible and accessible without
+// leaking JavaScript's `undefined` into an operational table.
+const traceStateKeys = Object.freeze({
+  waiting: "wip_waiting",
+  reserved: "wip_reserved",
+  moving: "wip_moving",
+  processing: "wip_processing",
+  completed: "wip_completed",
+  release_pending: "wip_release_pending",
+  setup: "wip_setup",
+  down: "wip_down",
+  maintenance: "wip_maintenance",
+  blocked: "wip_blocked",
+  starved: "ops_state_starved",
+  offshift: "wip_offshift",
+  resource_wait: "wip_resource_wait",
+  idle: "ops_state_idle",
+});
+function traceStateLabel(state) {
+  return tr(traceStateKeys[state] || "allocation_state_unknown");
+}
+function traceStateBadge(state) {
+  const known = Object.hasOwn(traceStateKeys, state);
+  const raw = typeof state === "string" && state ? state : tr("allocation_state_missing");
+  const detail = known ? traceStateLabel(state) : tr("allocation_state_unknown_detail", [raw]);
+  return `<span class="trace-state ${known ? `trace-state-${esc(state)}` : "trace-state-unknown"}" data-state-known="${known}" title="${esc(detail)}" aria-label="${esc(detail)}">${esc(traceStateLabel(state))}</span>`;
+}
+function tracePlacementLabel(lot) {
+  const placement = lot?.placement;
+  if (!placement || typeof placement !== "object") return tr("allocation_placement_unavailable");
+  const key = {
+    buffer: "allocation_placement_buffer",
+    machine: "allocation_placement_machine",
+    transport: "allocation_placement_transport",
+    release: "allocation_placement_release",
+  }[placement.kind] || "allocation_placement_unknown";
+  return `${tr(key)}${placement.id === undefined || placement.id === null || placement.id === "" ? "" : ` · ${placement.id}`}`;
+}
+function blockedReason(lot, cursor) {
+  if (lot?.state !== "blocked") return "—";
+  const event = (S.result?.events.slice(0, cursor) || []).findLast(e =>
+    (e.affected_lot_id === lot.id || e.lot?.id === lot.id) &&
+    (e.kind === "blocked" || e.kind === "buffer_wait" || e.lot?.state === "blocked") &&
+    (e.reason || e.reason_message));
+  return event ? localized(event.reason, event.reason_message) : tr("allocation_reason_unavailable");
+}
 async function api(path, body) {
   if (PUBLIC_DEMO) throw new Error(tr("public_scope"));
   const res = await fetch(path, {
@@ -290,10 +337,9 @@ function renderAllocationComparison() {
   const beforeCursor = allocation?.before_cursor ?? current.index;
   const afterCursor = allocation?.after_cursor ?? current.index + (current.outcome === "route_preference" ? 2 : 1);
   const before = stateAt(beforeCursor), after = stateAt(afterCursor);
-  const labels = {waiting:tr("ui_2"), moving:tr("ui_29"), processing:tr("ui_30"), completed:tr("ui_9"), idle:tr("ui_31"), reserved:tr("ui_32")};
   function panel(state, other, title, cursor) {
     const row = (value, previous, content) => `<tr class="${JSON.stringify(value) !== JSON.stringify(previous) ? "state-changed" : ""}">${content}</tr>`;
-    return `<section class="allocation-state"><h3>${title} ${tr("ui_33")} ${cursor}</h3><h4>${tr("ui_34")}</h4><table><thead><tr><th>${tr("ui_35")}</th><th>${tr("ui_36")}</th><th>${tr("ui_37")}</th><th>${tr("ui_38")}</th></tr></thead><tbody>${Object.values(state.lots).map(l => row(l, other.lots[l.id], `<td>${esc(l.id)}</td><td>${esc(l.location)}</td><td>${labels[l.state]}</td><td>${esc(l.target || tr("ui_39"))}</td>`)).join("")}</tbody></table><h4>${tr("ui_40")}</h4><table><thead><tr><th>${tr("ui_40")}</th><th>${tr("ui_37")}</th><th>${tr("ui_35")}</th></tr></thead><tbody>${Object.entries(state.machines).map(([id,m]) => row(m, other.machines[id], `<td>${esc(id)}</td><td>${labels[m.state]}</td><td>${esc(m.lot || "—")}</td>`)).join("")}</tbody></table><h4>${tr("ui_41")}</h4><p>${tr("ui_42")}</p><table><thead><tr><th>${tr("ui_43")}</th><th>${tr("ui_44")}</th><th>${tr("ui_45")}</th></tr></thead><tbody>${Object.entries(state.queues).map(([id,q]) => row(q, other.queues[id], `<td>${esc(id)}</td><td>${q.length}</td><td>${q.map(esc).join(" → ") || "—"}</td>`)).join("")}</tbody></table></section>`;
+    return `<section class="allocation-state"><h3>${title} ${tr("ui_33")} ${cursor}</h3><h4>${tr("ui_34")}</h4><table><thead><tr><th>${tr("ui_35")}</th><th>${tr("ui_36")}</th><th>${tr("allocation_physical")}</th><th>${tr("ui_37")}</th><th>${tr("ui_38")}</th><th>${tr("allocation_block_reason")}</th></tr></thead><tbody>${Object.values(state.lots).map(l => row(l, other.lots[l.id], `<td>${esc(l.id)}</td><td>${esc(l.location)}</td><td>${esc(tracePlacementLabel(l))}</td><td>${traceStateBadge(l.state)}</td><td>${esc(l.target || tr("ui_39"))}</td><td>${esc(blockedReason(l, cursor))}</td>`)).join("")}</tbody></table><h4>${tr("ui_40")}</h4><table><thead><tr><th>${tr("ui_40")}</th><th>${tr("ui_37")}</th><th>${tr("ui_35")}</th></tr></thead><tbody>${Object.entries(state.machines).map(([id,m]) => row(m, other.machines[id], `<td>${esc(id)}</td><td>${traceStateBadge(m.state)}</td><td>${esc(m.lot || "—")}</td>`)).join("")}</tbody></table><h4>${tr("ui_41")}</h4><p>${tr("ui_42")}</p><table><thead><tr><th>${tr("ui_43")}</th><th>${tr("ui_44")}</th><th>${tr("ui_45")}</th></tr></thead><tbody>${Object.entries(state.queues).map(([id,q]) => row(q, other.queues[id], `<td>${esc(id)}</td><td>${q.length}</td><td>${q.map(esc).join(" → ") || "—"}</td>`)).join("")}</tbody></table></section>`;
   }
   $("#allocation-detail").innerHTML = `<h3>${esc(allocation?.id || tr("ui_46"))} · ${esc(allocation?.destination || (current.outcome === "route_preference" ? tr("ui_26") : tr("ui_47")))}</h3><p>${tr("ui_48")} ${esc(localized(current.reason, current.reason_message))} ${tr("ui_49")} ${S.cursor}</p><p>${tr("ui_50")}</p><button id="allocation-before">${tr("ui_51")}</button> <button id="allocation-after">${tr("ui_52")}</button><div class="allocation-pair">${panel(before, after, tr("ui_53"), beforeCursor)}${panel(after, before, allocation ? tr("ui_54") : tr("ui_55"), afterCursor)}</div><h3>${tr("ui_56")}</h3>${(current.candidates || []).map(c => `<div class="info-card ${c.id === current.chosen ? "selected" : ""}"><b>${c.id === current.chosen ? tr("ui_57") : tr("ui_58")} · ${esc(c.lot_id)} / ${esc(c.route_id)}</b>${esc(c.from)} → ${esc(c.to)} ${tr("ui_59")} ${c.priority} ${tr("ui_60")} ${c.queue_length}</div>`).join("")}${(current.checks || []).filter(c => !c.eligible).map(c => `<div class="info-card rejected">${tr("ui_61")} ${esc(c.lot_id)} / ${esc(c.route_id)} · ${esc(localized(c.reason, c.reason_message))}</div>`).join("")}`;
   $("#allocation-before").onclick = () => {pause(); seek(beforeCursor, true);};

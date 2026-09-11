@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "kind": "model",
+  "time_unit": "minutes",
+  "model": {
+    "name": "Field audit — finite storage",
+    "mode": "pull",
+    "duration": 20,
+    "seed": 1,
+    "source": {
+      "count": 2,
+      "interval": 0.1,
+      "products": [
+        "A",
+        "B"
+      ]
+    },
+    "processes": [
+      {
+        "id": "P",
+        "name": "공정"
+      }
+    ],
+    "machines": [
+      {
+        "id": "M",
+        "name": "머신",
+        "process": "P",
+        "line": "A",
+        "time": 4,
+        "resource_requirements": {
+          "processing": {
+            "OP": 1
+          }
+        },
+        "availability": [
+          {
+            "state": "offshift",
+            "start": 0,
+            "end": 2
+          }
+        ],
+        "setup_time": 0.25
+      },
+      {
+        "id": "N",
+        "name": "N",
+        "process": "P",
+        "line": "A",
+        "time": 4,
+        "resource_requirements": {
+          "processing": {
+            "OP": 1
+          }
+        },
+        "availability": [
+          {
+            "state": "offshift",
+            "start": 0,
+            "end": 2
+          }
+        ],
+        "setup_time": 0.25
+      }
+    ],
+    "routes": [
+      {
+        "id": "in",
+        "from": "INPUT",
+        "to": "M",
+        "priority": 0,
+        "delay": 0,
+        "product": "A",
+        "enabled": true
+      },
+      {
+        "id": "out",
+        "from": "M",
+        "to": "OUTPUT",
+        "priority": 0,
+        "delay": 0,
+        "product": "*",
+        "enabled": true
+      },
+      {
+        "id": "inN",
+        "from": "INPUT",
+        "to": "N",
+        "priority": 0,
+        "delay": 0,
+        "product": "B",
+        "enabled": true
+      },
+      {
+        "id": "outN",
+        "from": "N",
+        "to": "OUTPUT",
+        "priority": 0,
+        "delay": 0,
+        "product": "*",
+        "enabled": true
+      }
+    ],
+    "resources": [
+      {
+        "id": "OP",
+        "kind": "operator",
+        "capacity": 1
+      }
+    ],
+    "buffers": [
+      {
+        "id": "IN",
+        "at": "INPUT",
+        "capacity": 1,
+        "policy": "fifo"
+      },
+      {
+        "id": "OUT",
+        "at": "OUTPUT",
+        "capacity": 1,
+        "policy": "fifo"
+      }
+    ],
+    "orders": [
+      {
+        "id": "O0",
+        "product": "A",
+        "quantity": 1,
+        "release_time": 0.5,
+        "due_time": 5,
+        "priority": 0
+      },
+      {
+        "id": "O1",
+        "product": "B",
+        "quantity": 1,
+        "release_time": 0.5,
+        "due_time": 6,
+        "priority": 0
+      },
+      {
+        "id": "O2",
+        "product": "A",
+        "quantity": 1,
+        "release_time": 0.5,
+        "due_time": 7,
+        "priority": 0
+      },
+      {
+        "id": "O3",
+        "product": "B",
+        "quantity": 1,
+        "release_time": 0.5,
+        "due_time": 8,
+        "priority": 0
+      }
+    ]
+  }
+}
