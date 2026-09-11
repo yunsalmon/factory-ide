@@ -183,3 +183,5 @@ semantics, finite INPUT admission, localized validation and tests.
 Planner scenario comparison: run and save named snapshots, compare signed final-horizon KPIs, inspect paired trace evidence, and export/restore without rerunning. See [scenario contract and metric definitions](docs/scenario-comparison.md).
 
 Repeated browser experiments support explicit seed sets, bounded concurrency, cancellation, KPI uncertainty and portable artifacts. See [experiment contracts and local runtime setup](docs/experiments.md).
+
+Cold browser-runtime delivery and the five-context local/public release gate are documented in [docs/runtime-delivery.md](docs/runtime-delivery.md).

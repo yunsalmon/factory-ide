@@ -22,6 +22,10 @@ def build(output, revision, runtime_dir=None):
     runtime_dir = runtime_dir or ROOT / '.cache' / 'browser-runtime'
     runtime_manifest = fetch(runtime_dir)
     shutil.copytree(runtime_dir, output / 'vendor' / 'pyodide' / runtime_manifest['pyodide'], dirs_exist_ok=True)
+    # CDN default extension eligibility: byte-identical WASM delivery alias.
+    # Nginx explicitly serves it as application/wasm, with nosniff.
+    vendor = output / 'vendor' / 'pyodide' / runtime_manifest['pyodide']
+    shutil.copyfile(vendor / 'pyodide.asm.wasm', vendor / 'pyodide.asm.wasm.js')
     python_runtime = output / 'runtime'
     python_runtime.mkdir(exist_ok=True)
     for name in ('engine.py', 'model.py', 'messages.py', 'orders.py', 'disruptions.py', 'operation_metrics.py'):
@@ -37,7 +41,10 @@ def build(output, revision, runtime_dir=None):
     version = dict(source_revision=revision, trace_schema=result['schema_version'],
                    source_sha256=source_sha256,
                    trace_sha256=hashlib.sha256(trace.encode()).hexdigest(),
-                   browser_runtime=runtime_manifest)
+                   browser_runtime=runtime_manifest,
+                   browser_runtime_delivery=dict(
+                       wasm_path=f"/vendor/pyodide/{runtime_manifest['pyodide']}/pyodide.asm.wasm.js",
+                       wasm_sha256=runtime_manifest['artifacts']['pyodide.asm.wasm']))
     (output / 'demo.json').write_text(json.dumps(dict(source=source, result=result, version=version), ensure_ascii=False))
     (output / 'version.json').write_text(json.dumps(version))
     (output / 'healthz').write_text('ok\n')

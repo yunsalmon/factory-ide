@@ -110,6 +110,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, (ROOT / path.removeprefix('/runtime/')).read_bytes(), 'text/plain; charset=utf-8')
         if path.startswith(f'/vendor/pyodide/{PYODIDE_VERSION}/'):
             name = path.removeprefix(f'/vendor/pyodide/{PYODIDE_VERSION}/')
+            # Source checkout has only downloaded canonical artifacts, not build_public aliases.
+            # Reuse the pinned bytes and canonical MIME; ignore any stale generated alias.
+            if name == 'pyodide.asm.wasm.js':
+                name = 'pyodide.asm.wasm'
             target = ROOT / '.cache/browser-runtime' / name
             if '/' not in name and name in ('pyodide.js','pyodide.asm.js','pyodide.asm.wasm','python_stdlib.zip','pyodide-lock.json','simpy-4.1.1-py3-none-any.whl') and target.is_file():
                 return self.send(200, target.read_bytes(), 'application/wasm' if name.endswith('.wasm') else 'text/javascript' if name.endswith('.js') else 'application/octet-stream')

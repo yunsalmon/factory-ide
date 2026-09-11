@@ -18,7 +18,7 @@ def get(path, headers=None):
 _, _, version = get('/version.json')
 version = json.loads(version)
 runtime = version['browser_runtime']
-for name in ['pyodide.asm.wasm', 'pyodide.asm.js', 'pyodide.js']:
+for name in ['pyodide.asm.wasm', 'pyodide.asm.wasm.js', 'pyodide.asm.js', 'pyodide.js']:
     path = '/vendor/pyodide/' + runtime['pyodide'] + '/' + name
     status, raw_headers, raw = get(path, {'Accept-Encoding': 'identity'})
     assert status == 200 and raw_headers.get('Content-Encoding') is None
@@ -28,9 +28,17 @@ for name in ['pyodide.asm.wasm', 'pyodide.asm.js', 'pyodide.js']:
     assert headers['Cache-Control'] == 'public, max-age=86400, must-revalidate'
     assert len(compressed) < len(raw) * .95
     assert gzip.decompress(compressed) == raw
-    assert hashlib.sha256(raw).hexdigest() == runtime['artifacts'][name]
-    if name.endswith('.wasm'):
+    assert hashlib.sha256(raw).hexdigest() == runtime['artifacts']['pyodide.asm.wasm' if name == 'pyodide.asm.wasm.js' else name]
+    if name in ['pyodide.asm.wasm', 'pyodide.asm.wasm.js']:
         assert headers['Content-Type'] == 'application/wasm'
+    if name == 'pyodide.asm.wasm.js':
+        assert raw == get(path[:-3], {'Accept-Encoding': 'identity'})[2]
+        assert compressed == get(path[:-3], {'Accept-Encoding': 'gzip'})[2]
+        assert headers['X-Content-Type-Options'] == 'nosniff'
+        assert version['browser_runtime_delivery']['wasm_path'] == path
+        assert version['browser_runtime_delivery']['wasm_sha256'] == hashlib.sha256(raw).hexdigest()
+        status, _, part = get(path, {'Accept-Encoding': 'identity', 'Range': 'bytes=0-7'})
+        assert status == 206 and part == raw[:8] == b'\x00asm\x01\x00\x00\x00'
     status, _, body = get(path, {'Accept-Encoding': 'gzip', 'If-None-Match': headers['ETag']})
     assert status == 304 and not body
     print(f'PASS {name}: {len(raw):,} -> {len(compressed):,} bytes ({100*len(compressed)/len(raw):.1f}%)')
