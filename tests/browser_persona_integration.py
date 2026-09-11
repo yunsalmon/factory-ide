@@ -1,7 +1,7 @@
 """Canonical import feeds all operator projections and immutable scenario restore."""
 import atexit,json,subprocess,sys
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from test_persona_integration import combined_model
 server=subprocess.Popen([sys.executable,str(ROOT/'server.py'),'--port','0'],cwd=ROOT,stdout=subprocess.PIPE,text=True)
@@ -17,6 +17,10 @@ with sync_playwright() as p:
   page.locator('[data-tab="data"]').click()
   before=page.evaluate('S.source')
   page.locator('#data-file').set_input_files({'name':'canonical.json','mimeType':'application/json','buffer':json.dumps(doc).encode()})
+  page.wait_for_function('()=>!DATA.busy && DATA.text!==null')
+  expect(page.locator('#data-confirm')).to_be_disabled()
+  assert page.evaluate('DATA.pending') is None
+  page.locator('#data-dry-run').click()
   page.wait_for_function('()=>DATA.pending?.kind==="model" && !DATA.busy')
   assert page.evaluate('S.source')==before
   page.locator('#data-confirm').click();page.wait_for_function('()=>!DATA.busy && S.model.orders?.length===4')
@@ -39,6 +43,10 @@ with sync_playwright() as p:
   page.locator('[data-tab="data"]').click()
   observed=dict(schema_version=1,kind='observations',events=[dict(id='PRIVATE_INTEGRATION_RAW',kind='arrival',time=0,lot='OBS'),dict(id='end',kind='complete',time=3,lot='OBS')])
   page.locator('#data-file').set_input_files({'name':'observations.json','mimeType':'application/json','buffer':json.dumps(observed).encode()})
+  page.wait_for_function('()=>!DATA.busy && DATA.text!==null')
+  expect(page.locator('#data-confirm')).to_be_disabled()
+  assert page.evaluate('DATA.pending') is None
+  page.locator('#data-dry-run').click()
   page.wait_for_function('()=>DATA.pending?.kind==="observations" && !DATA.busy');page.locator('#data-confirm').click()
   page.wait_for_function('()=>DATA.observations?.events.length===2 && !DATA.busy')
   assert page.evaluate('simulatedCalibration(S.result,S.result.events.length,true,0,S.result.summary.horizon).throughput.lots')==4
