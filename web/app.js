@@ -40,6 +40,7 @@ const S = {
 let parseTimer,
   playTimer,
   toastTimer,
+  validationGeneration = 0,
   autoFit = true,
   runSerial = 0,
   editor = null,
@@ -230,13 +231,15 @@ function invalidateTrace() {
   renderTrace();
   renderGraph();
 }
-async function applyCode(silent = false) {
+async function applyCode(silent = false, generation = validationGeneration) {
   clearTimeout(parseTimer);
+  parseTimer = null;
+  if (generation !== validationGeneration) return false;
   const revision = S.revision,
     source = S.source;
   try {
     const data = PUBLIC_DEMO ? await browserRuntime.parse(source) : await api("/api/parse", { source });
-    if (revision !== S.revision) return false;
+    if (generation !== validationGeneration || revision !== S.revision) return false;
     S.model = data.model;
     S.warnings = data.warnings;
     S.warningMessages = data.warning_messages || [];
@@ -251,7 +254,7 @@ async function applyCode(silent = false) {
     if (!silent) status({code: "ui_17"});
     return true;
   } catch (e) {
-    if (revision !== S.revision) return false;
+    if (generation !== validationGeneration || revision !== S.revision) return false;
     S.valid = false;
     S.parseErrorDetail = e.code === "browser_init_error" ? {code: "public_init_error"} : e.code === "browser_init_timeout" ? {code: "public_init_timeout"} : e.detail || e.error_message;
     diagnostics(localized(e.message, S.parseErrorDetail));
@@ -1089,7 +1092,11 @@ $("#code").addEventListener("input", () => {
   $("#dirty-dot").textContent = "●";
   $("#sync-status").textContent = tr("ui_155");
   clearTimeout(parseTimer);
-  parseTimer = setTimeout(() => applyCode(true), 500);
+  const generation = validationGeneration;
+  parseTimer = setTimeout(() => {
+    parseTimer = null;
+    if (generation === validationGeneration) applyCode(true, generation);
+  }, 500);
 });
 $("#code").addEventListener("scroll", () => ($("#line-numbers").scrollTop = $("#code").scrollTop));
 $("#code").addEventListener("click", updateEditor);
@@ -1475,8 +1482,18 @@ function persistReplay() {
     else localStorage.removeItem(key);
   } catch { /* Source saving remains independent when a large trace exceeds quota. */ }
 }
+function invalidatePendingValidation() {
+  clearTimeout(parseTimer);
+  parseTimer = null;
+  validationGeneration++;
+}
 window.addEventListener("pagehide", () => {
   persistReplay();
+  // Invalidate deferred producers before terminating current consumers. A
+  // persisted BFCache page keeps its UI/source, but performs no hidden work;
+  // a later user action uses the new validation generation normally.
+  invalidateDataWork();
+  invalidatePendingValidation();
   cancelExperiment();
   dataWorkerStop(DATA.worker);
   browserRuntime?.stop();

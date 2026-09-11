@@ -3,6 +3,7 @@
 const DATA={table:'machines',format:'csv',file:null,text:null,headers:[],mapping:{},options:{unit:'minutes',timezone:'Z',origin:''},worker:null,serial:0,busy:false,phase:null,pending:null,diagnostics:[],observations:null,message:null,windowStart:0,windowEnd:null,final:true};
 function dataValue(value){return value==null?tr('data_unknown'):typeof value==='number'?new Intl.NumberFormat(locale,{maximumFractionDigits:4}).format(value):value;}
 function invalidateDataPreview(){DATA.pending=null;DATA.diagnostics=[];DATA.message=null;}
+function invalidateDataWork(){DATA.serial++;DATA.busy=false;DATA.phase=null;}
 function dataWorkerStop(worker){if(!worker)return;worker.terminate();factoryWorkerResources.release(worker.factoryResource);if(DATA.worker===worker)DATA.worker=null;}
 function dataWorkerCreate(){
  const owner={role:'data',resourceId:null};factoryWorkerResources.allocate(owner);let worker;

@@ -33,6 +33,14 @@ initialization/execution timeout, and pagehide terminate the target and clear
 pending requests. Page teardown also invalidates an experiment that is still
 starting and cancels all active experiment lanes and data import work.
 
+Teardown invalidates deferred producers before stopping their Workers. It
+advances the data-import request serial so a pending `File.text()` result cannot
+start parsing, and advances the editor validation generation while clearing its
+500 ms debounce. For a persisted BFCache page, completed UI state, editor text,
+and validated import previews remain available, but hidden work does not resume
+automatically. A new edit, validation, or file selection after restoration may
+create fresh bounded Workers under the same ledger contract.
+
 ## Automated measurement
 
 Run the contract gate against a freshly built static image:

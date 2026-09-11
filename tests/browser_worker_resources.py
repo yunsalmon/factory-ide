@@ -215,6 +215,58 @@ with sync_playwright() as playwright:
     wait_targets(1, 30)
     assert page.evaluate('factoryWorkerResources.snapshot()') == {'contractVersion': 1, 'interactive': 1, 'experiment': 0, 'data': 0, 'total': 1}
 
+    # A persisted pagehide must invalidate producers which have not created a
+    # Worker yet: delayed File.text and the editor's 500 ms validation debounce.
+    lifecycle_start = page.evaluate('''()=>{
+      selectTab('data');
+      window.__lateReadRelease=null;
+      window.__lateReadPromise=readDataFile({name:'late.csv',size:32,text:()=>new Promise(resolve=>__lateReadRelease=resolve)});
+      editor.setValue(S.source+'\\n# pending lifecycle validation');
+      const before={dataSerial:DATA.serial,validationGeneration,created:__workerResourceAudit.created.length,
+        source:S.source,tab:S.tab,pendingTimer:parseTimer!==null};
+      dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));
+      return {before,after:{dataSerial:DATA.serial,validationGeneration,created:__workerResourceAudit.created.length,
+        source:S.source,tab:S.tab,pendingTimer:parseTimer!==null,busy:DATA.busy,phase:DATA.phase,
+        ledger:factoryWorkerResources.snapshot(),live:{...__workerResourceAudit.live}}};
+    }''')
+    assert lifecycle_start['before']['pendingTimer'], lifecycle_start
+    assert lifecycle_start['after']['dataSerial'] == lifecycle_start['before']['dataSerial'] + 1, lifecycle_start
+    assert lifecycle_start['after']['validationGeneration'] == lifecycle_start['before']['validationGeneration'] + 1, lifecycle_start
+    assert lifecycle_start['after']['source'] == lifecycle_start['before']['source'] and lifecycle_start['after']['tab'] == lifecycle_start['before']['tab'], lifecycle_start
+    assert lifecycle_start['after']['pendingTimer'] is False and lifecycle_start['after']['busy'] is False and lifecycle_start['after']['phase'] is None, lifecycle_start
+    assert lifecycle_start['after']['ledger']['total'] == 0 and all(value == 0 for value in lifecycle_start['after']['live'].values()), lifecycle_start
+    wait_targets(0)
+    page.evaluate("async()=>{__lateReadRelease('id,name\\nLATE,late row\\n');await __lateReadPromise}")
+    page.wait_for_timeout(750)
+    lifecycle_hidden = page.evaluate('''()=>({created:__workerResourceAudit.created.length,dataSerial:DATA.serial,
+      dataText:DATA.text,pending:DATA.pending,pendingTimer:parseTimer!==null,ledger:factoryWorkerResources.snapshot()})''')
+    assert lifecycle_hidden == {
+        'created': lifecycle_start['before']['created'],
+        'dataSerial': lifecycle_start['after']['dataSerial'],
+        'dataText': None,
+        'pending': None,
+        'pendingTimer': False,
+        'ledger': {'contractVersion': 1, 'interactive': 0, 'experiment': 0, 'data': 0, 'total': 0},
+    }, lifecycle_hidden
+    wait_targets(0)
+
+    # Simulate BFCache restoration. State remains, while only a new edit/file
+    # selection explicitly starts fresh bounded work.
+    page.evaluate('''()=>{
+      dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));
+      editor.setValue(editor.getValue()+'\\n# restored lifecycle validation');
+    }''')
+    page.wait_for_function('()=>S.valid&&browserRuntime.state==="ready"', timeout=30000)
+    wait_targets(1, 30)
+    page.evaluate('''()=>readDataFile(new File(['id,name\\nRECOVERED,recovered row\\n'],'recovered.csv',{type:'text/csv'}))''')
+    page.wait_for_function('()=>DATA.message?.code==="data_mapping_ready"&&!DATA.busy&&DATA.worker===null', timeout=10000)
+    wait_targets(1)
+    lifecycle_recovery = page.evaluate('''()=>({source:S.source,tab:S.tab,dataSerial:DATA.serial,
+      mappingReady:DATA.message.code==='data_mapping_ready',ledger:factoryWorkerResources.snapshot(),
+      live:{...__workerResourceAudit.live}})''')
+    assert lifecycle_recovery['source'].endswith('# restored lifecycle validation') and lifecycle_recovery['tab'] == lifecycle_start['before']['tab'], lifecycle_recovery
+    assert lifecycle_recovery['mappingReady'] and lifecycle_recovery['ledger'] == {'contractVersion': 1, 'interactive': 1, 'experiment': 0, 'data': 0, 'total': 1}, lifecycle_recovery
+
     # Public work stays in Workers at the same origin and never uses an API.
     assert not any('/api/' in url for url in requests), requests
     assert page.evaluate('''async()=>{try{await fetch('https://example.invalid/worker-contract')}catch{return true}return false}''')
@@ -224,6 +276,7 @@ with sync_playwright() as playwright:
         'idempotent_create': idempotence,
         'concurrent_apply_pairs': concurrent_pairs,
         'handled_error_recovery': handled_error,
+        'pending_pagehide': {'start': lifecycle_start, 'hidden': lifecycle_hidden, 'recovery': lifecycle_recovery},
         'warm_validation_ms': warm,
         'warm_validation_p95_ms': warm_p95,
         'idle_reclaims': page.evaluate('browserRuntime.idleReclaims'),
