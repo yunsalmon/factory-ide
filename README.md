@@ -126,9 +126,11 @@ def process_lot(env, machine, lot, context):
 
 ## 검증
 
-엔진, 동기화, API 테스트:
+엔진, 동기화, API 및 브라우저 JavaScript WIP 집계 테스트:
 
 ```bash
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m playwright install chromium
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
@@ -138,6 +140,7 @@ def process_lot(env, machine, lot, context):
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m playwright install chromium
 .venv/bin/python tests/browser_smoke.py
+.venv/bin/python tests/browser_inventory.py
 ```
 
 브라우저 테스트는 임시 포트의 서버를 자체 실행합니다. Linux에서 브라우저 시스템 라이브러리가 없으면 `python -m playwright install --with-deps chromium`을 사용하세요. 테스트 스크린샷은 `artifacts/`에 저장됩니다. GitHub Actions에서도 동일한 테스트를 실행합니다.
@@ -155,3 +158,28 @@ tests/            엔진·API·브라우저 검증
 ```
 
 편집·실행·시각화 작업 흐름은 [Jaspera](https://github.com/JVMLand/Jaspera)에서 영감을 받았습니다. [FactorySimPy](https://github.com/FactorySimPy/FactorySimPy)는 제조 시스템 모델링의 참고 자료로 검토했으며, 이 프로젝트는 **SimPy를 직접 사용한 별도 엔진**입니다. 두 프로젝트의 코드를 복사하거나 런타임 의존성으로 포함하지 않습니다. 번들 라이선스는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참고하세요.
+
+## Public browser sandbox
+
+The static public build edits and runs Python/SimPy inside a disposable browser Web Worker.
+It has no server execution API and retains the versioned example as the initial/reset fallback.
+Korean, English and Japanese builds support run, stop, timeout, diagnostics, import/download,
+and schema-v2 result export with source and runtime metadata.
+See [public demo deployment and recovery](docs/public-demo.md) for isolated build/testing,
+container operation and the proposed `factory.yshnote.com` ingress plan. This repository
+change alone does not establish that the external HTTPS deployment is live or accepted.
+
+## WIP 현황판
+
+실행 후 **WIP 현황판** 탭에서 현재 재생 이벤트까지의 로트를 공정·라인·위치별로 확인합니다. 최종 상태 보기는 재생 커서와 별도로 표시합니다. 필터·검색, 그룹/로트 선택에 따른 공정도 강조, 커서까지의 이력과 선택 이유, 표시 로트 CSV 내보내기를 지원합니다. 수량·출하 지시 시각이 모델에 없으면 값을 만들지 않습니다. 현재 추정 대기열과 향후 명시적 버퍼를 연결하는 계약 및 집계 기준은 [WIP projection](docs/inventory-projection.md)에 설명합니다.
+### Order planning
+
+The **Order planner** tab adds optional order quantities, split lots, scheduled releases,
+business priority and due-date tracking without changing legacy generated supply.
+Try `examples/orders_demo.py`; use the tab's JSON plan editor/import/export and filtered CSV.
+See [order schema, replay metrics and dispatch contract](docs/orders.md) for time/date
+semantics, finite INPUT admission, localized validation and tests.
+
+Planner scenario comparison: run and save named snapshots, compare signed final-horizon KPIs, inspect paired trace evidence, and export/restore without rerunning. See [scenario contract and metric definitions](docs/scenario-comparison.md).
+
+Repeated browser experiments support explicit seed sets, bounded concurrency, cancellation, KPI uncertainty and portable artifacts. See [experiment contracts and local runtime setup](docs/experiments.md).

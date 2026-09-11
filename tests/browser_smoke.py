@@ -32,7 +32,7 @@ def go_end(page):
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
-    context = browser.new_context(viewport={'width': 1440, 'height': 1080}, device_scale_factor=1)
+    context = browser.new_context(locale="ko-KR", viewport={'width': 1440, 'height': 1080}, device_scale_factor=1)
     page = context.new_page()
     errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
