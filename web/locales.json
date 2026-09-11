@@ -770,7 +770,19 @@
     "ex_incompatible": "호환되는 성공 실행 없음: 기간·단위·스키마를 확인하세요.",
     "ex_limit": "실험 크기 한도 초과.",
     "ex_integrity": "실험 파일 무결성 검사 실패.",
-    "ex_no_samples": "측정된 KPI 표본이 없습니다."
+    "ex_no_samples": "측정된 KPI 표본이 없습니다.",
+    "allocation_physical": "물리 배치",
+    "allocation_block_reason": "막힘 원인",
+    "allocation_state_unknown": "알 수 없는 상태",
+    "allocation_state_unknown_detail": "알 수 없는 상태: {0}",
+    "allocation_state_missing": "상태 값 없음",
+    "allocation_placement_buffer": "버퍼",
+    "allocation_placement_machine": "머신",
+    "allocation_placement_transport": "운송 경로",
+    "allocation_placement_release": "투입 대기",
+    "allocation_placement_unknown": "알 수 없는 배치",
+    "allocation_placement_unavailable": "배치 확인 불가",
+    "allocation_reason_unavailable": "원인 확인 불가"
   },
   "en": {
     "ui_1": "Arrival",
@@ -1543,7 +1555,19 @@
     "ex_incompatible": "No compatible successful runs: check horizons, units and schemas.",
     "ex_limit": "Experiment size limit exceeded.",
     "ex_integrity": "Experiment artifact integrity check failed.",
-    "ex_no_samples": "No measured KPI samples are available."
+    "ex_no_samples": "No measured KPI samples are available.",
+    "allocation_physical": "Physical placement",
+    "allocation_block_reason": "Blocking reason",
+    "allocation_state_unknown": "Unknown state",
+    "allocation_state_unknown_detail": "Unknown state: {0}",
+    "allocation_state_missing": "Missing state value",
+    "allocation_placement_buffer": "Buffer",
+    "allocation_placement_machine": "Machine",
+    "allocation_placement_transport": "Transport route",
+    "allocation_placement_release": "Pending release",
+    "allocation_placement_unknown": "Unknown placement",
+    "allocation_placement_unavailable": "Placement unavailable",
+    "allocation_reason_unavailable": "Reason unavailable"
   },
   "ja": {
     "ui_1": "投入",
@@ -2316,6 +2340,18 @@
     "ex_incompatible": "互換性のある成功実行なし：期間・単位・スキーマを確認してください。",
     "ex_limit": "実験サイズ上限超過。",
     "ex_integrity": "実験ファイルの整合性検証に失敗。",
-    "ex_no_samples": "測定済み KPI 標本はありません。"
+    "ex_no_samples": "測定済み KPI 標本はありません。",
+    "allocation_physical": "物理配置",
+    "allocation_block_reason": "閉塞理由",
+    "allocation_state_unknown": "不明な状態",
+    "allocation_state_unknown_detail": "不明な状態: {0}",
+    "allocation_state_missing": "状態値なし",
+    "allocation_placement_buffer": "バッファ",
+    "allocation_placement_machine": "マシン",
+    "allocation_placement_transport": "搬送経路",
+    "allocation_placement_release": "投入待ち",
+    "allocation_placement_unknown": "不明な配置",
+    "allocation_placement_unavailable": "配置を確認できません",
+    "allocation_reason_unavailable": "理由を確認できません"
   }
 }

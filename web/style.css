@@ -1372,6 +1372,9 @@ dialog li {
 .allocation-state td { white-space: normal; overflow-wrap: anywhere; }
 .allocation-state p { font-size: 12px; }
 .state-changed { background: #fff0c2; }
+.trace-state { display: inline-block; padding: 2px 7px; border: 1px solid #bfd1b8; border-radius: 999px; background: #eef5ea; color: #294d36; font-weight: 600; white-space: nowrap; }
+.trace-state-blocked { border-color: #bc784f; background: #fff0e2; color: #7b321f; }
+.trace-state-unknown { border: 2px dashed #8a6370; background: repeating-linear-gradient(135deg, #fff2f5, #fff2f5 5px, #f6e4e9 5px, #f6e4e9 10px); color: #71283d; }
 .machine-node.processing .node-bg { stroke: #51a277; }
 @media (max-width: 700px) { .allocation-pair { grid-template-columns: 1fr; } }
 .allocation-results { padding: 16px; }
