@@ -1333,13 +1333,19 @@ function canRestorePublicReplay(saved, source) {
   const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
   const text = value => typeof value === "string" && value.length > 0;
   const nullableText = value => value == null || typeof value === "string";
+  const number = value => typeof value === "number" && Number.isFinite(value);
+  const message = (value, depth = 0) => value == null || (depth < 8 && record(value) && text(value.code) &&
+    (value.args === undefined || (Array.isArray(value.args) && value.args.every(arg =>
+      arg == null || ["string", "number", "boolean"].includes(typeof arg) || message(arg, depth + 1)))));
   const lot = value => record(value) && text(value.id) && text(value.state) &&
     text(value.location) && typeof value.product === "string" &&
+    ["target", "route", "allocation_id", "preferred_route"].every(key => nullableText(value[key])) &&
     (value.placement == null || (record(value.placement) && text(value.placement.kind) && text(value.placement.id)));
   const dictionary = (value, check) => record(value) && Object.values(value).every(check);
   const machine = value => record(value) && text(value.state) && nullableText(value.lot);
+  const operation = value => machine(value) && number(value.since) && nullableText(value.cause);
   const snapshots = value => record(value) && dictionary(value.lots, lot) && dictionary(value.machines, machine) &&
-    (value.machine_operations === undefined || dictionary(value.machine_operations, machine)) &&
+    (value.machine_operations === undefined || dictionary(value.machine_operations, operation)) &&
     (value.buffers === undefined || dictionary(value.buffers, b => record(b) && text(b.id) && text(b.at) &&
       Array.isArray(b.contents) && b.contents.every(text))) &&
     (value.resources === undefined || dictionary(value.resources, r => record(r) &&
@@ -1349,6 +1355,21 @@ function canRestorePublicReplay(saved, source) {
     const result = saved.result, model = result.model;
     if (!record(model) || validateDataModel(model).length ||
         model.machines.some(m => typeof m.name !== "string")) return false;
+    const machines = new Set(model.machines.map(m => m.id));
+    const routes = new Set(model.routes.map(route => route.id));
+    const destinations = new Set(["INPUT", "OUTPUT", ...machines]);
+    // Initial paint does not visit inspectors. Validate their required fields
+    // here, by event kind, before accepting any deferred row/tab interaction.
+    // Supplemental metadata is optional, but must be usable when supplied.
+    const eventKinds = new Set(["arrival", "ready", "decision", "assigned", "route_preference", "move",
+      "start", "finish", "complete", "blocked", "machine_state", "order_release", "buffer_enter",
+      "buffer_wait", "transport_arrive", "setup_plan", "setup_complete", "resource_wait", "resource_acquire", "resource_release"]);
+    const candidate = c => record(c) && ["id", "lot_id", "route_id", "from", "to"].every(key => text(c[key])) &&
+      routes.has(c.route_id) && destinations.has(c.from) && destinations.has(c.to) &&
+      ["priority", "queue_length", "ready_since"].every(key => number(c[key])) && typeof c.same_line === "boolean";
+    const check = c => record(c) && text(c.lot_id) && routes.has(c.route_id) &&
+      typeof c.eligible === "boolean" && typeof c.reason === "string" && message(c.reason_message);
+    const transition = value => record(value) && operation(value.previous) && operation(value.current);
     scenarioContract(result); // schema, horizon, units, event indexes/times/limit
     if (!Array.isArray(result.warnings) || !result.warnings.every(v => typeof v === "string") ||
         (result.warning_messages !== undefined && !Array.isArray(result.warning_messages)) ||
@@ -1358,19 +1379,34 @@ function canRestorePublicReplay(saved, source) {
     // A zero-event snapshot can represent an empty workload, not a truncated
     // nonempty result with stale summary/allocation records.
     if (!result.events.length && (result.summary.arrived || result.summary.completed || result.allocations.length)) return false;
-    if (result.initial_state !== undefined && !snapshots(result.initial_state)) return false;
+    if (result.initial_state !== undefined && (!snapshots(result.initial_state) ||
+        (result.initial_state.machine_operations !== undefined &&
+          model.machines.some(m => !Object.hasOwn(result.initial_state.machine_operations, m.id))))) return false;
     for (const event of result.events) {
-      if (!record(event) || !text(event.kind) || !snapshots(event.state_changes) ||
+      if (!record(event) || !eventKinds.has(event.kind) || !snapshots(event.state_changes) ||
           (event.lot != null && !lot(event.lot)) || (event.kind !== "machine_state" && !lot(event.lot))) return false;
-      for (const key of ["candidates", "checks"]) {
-        if (event[key] !== undefined && (!Array.isArray(event[key]) || !event[key].every(record))) return false;
+      if (["reason", "machine", "route", "allocation_id", "chosen", "family", "previous_family"].some(key => !nullableText(event[key])) ||
+          !message(event.reason_message) || (event.duration !== undefined && (!number(event.duration) || event.duration < 0))) return false;
+      if ((event.kind === "decision" || event.candidates !== undefined) && (!Array.isArray(event.candidates) || !event.candidates.every(candidate))) return false;
+      if ((event.kind === "decision" || event.checks !== undefined) && (!Array.isArray(event.checks) || !event.checks.every(check))) return false;
+      if (event.kind === "decision" && (!["pull", "push"].includes(event.decision_mode) || typeof event.reason !== "string" ||
+          (event.chosen != null && !event.candidates.some(c => c.id === event.chosen)))) return false;
+      if ((event.kind === "machine_state" || event.transition !== undefined) && !transition(event.transition)) return false;
+      if (["machine_state", "transport_arrive", "setup_plan", "setup_complete", "start", "finish"].includes(event.kind) && !machines.has(event.machine)) return false;
+      if (["assigned", "route_preference", "move", "complete"].includes(event.kind) && !routes.has(event.route)) return false;
+      if (event.kind === "assigned" && !["reservation", "shipment", "queue"].includes(event.assignment_kind)) return false;
+      if (["start", "setup_plan", "setup_complete"].includes(event.kind) && !number(event.duration)) return false;
+      if (["setup_plan", "setup_complete"].includes(event.kind) && !text(event.family)) return false;
+      if (["buffer_enter", "buffer_wait"].includes(event.kind) && !text(event.buffer)) return false;
+      // operationView closes intervals by machine ID, including after a later
+      // tab switch. Unknown keys must not index a nonexistent previous interval.
+      for (const key of ["machines", "machine_operations"]) {
+        if (Object.keys(event.state_changes[key] || {}).some(id => !machines.has(id))) return false;
       }
     }
-    const routes = new Set(model.routes.map(route => route.id));
-    const destinations = new Set(["OUTPUT", ...model.machines.map(m => m.id)]);
     for (const allocation of result.allocations) {
       if (!record(allocation) || !text(allocation.id) || !text(allocation.lot_id) ||
-          !routes.has(allocation.route_id) || !destinations.has(allocation.destination) ||
+          !routes.has(allocation.route_id) || allocation.destination === "INPUT" || !destinations.has(allocation.destination) ||
           ![allocation.decision_index, allocation.before_cursor, allocation.after_cursor].every(
             n => Number.isInteger(n) && n >= 0 && n <= result.events.length)) return false;
     }

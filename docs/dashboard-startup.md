@@ -27,6 +27,24 @@ allocations, preserving the zero-work boundary without accepting a truncated
 nonempty trace. This is a display-shape check, not a signature or proof that a
 user-edited local trace is authentic.
 
+Validation covers deferred inspectors as well as the first paint. A decision
+requires both `candidates` and `checks` arrays, even when empty; candidate/check
+rows must contain their displayed IDs, numeric values and eligibility fields.
+A declined choice may have no chosen ID. Machine-state events require both
+previous/current operation records in `transition`; their lot may be null for
+pre-release transitions. Machine/route references, assignment kind, setup family,
+duration and buffer IDs are required for the event kinds that display them.
+Operation snapshots must name existing machines and include interval start times.
+Non-decision candidate/check arrays, reason messages, resource-request metadata
+and other supplemental fields remain optional; supplied display fields must have
+usable shapes. Unknown event kinds fall back to validation rather than silently
+claiming support. This does not attempt to authenticate or re-simulate event facts.
+
+The startup gate includes actual DOM row clicks on a restored browser-run decision
+in ko/en/ja, all current event-kind display fixtures (including nullable machine
+events), required/optional negative controls and later tab switches. This catches
+missing fields that a successful initial Results/Events paint cannot exercise.
+
 Projection/rendering is also part of adoption. If it fails, the candidate is
 discarded and all replay fields are reset before asynchronous source validation.
 A localized message explains that the saved trace could not be restored; the

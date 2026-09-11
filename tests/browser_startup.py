@@ -1,7 +1,9 @@
 """Public startup: exact snapshot restore without Python; observable async progress."""
 import json
 import sys
+from copy import deepcopy
 from playwright.sync_api import sync_playwright, expect
+from replay_event_contract import event_contract_fixture
 
 base = sys.argv[1].rstrip('/')
 with sync_playwright() as p:
@@ -19,6 +21,7 @@ with sync_playwright() as p:
     seed.evaluate('pause()')
     fixture = seed.evaluate('({source:S.source,result:S.result})')
     example_source = seed.evaluate('S.example')
+    all_kinds = event_contract_fixture(seed, fixture)
     seed.close()
     for language in ['en', 'ko', 'ja']:
         for cursor in [0, 1, 15, len(fixture['result']['events'])]:
@@ -42,8 +45,35 @@ with sync_playwright() as p:
             page.reload()
             page.wait_for_function('()=>window.factoryStudio && S.statusMessage?.code==="public_ready"')
             assert page.evaluate('JSON.stringify(stateAt(S.cursor))') == before
+            # The initial Results paint never visits the decision inspector.
+            # Click a real browser-run decision after intact restoration.
+            page.evaluate('()=>{closeInspector();selectTab("events");seek(S.result.events.length)}')
+            decision_index = next(e['index'] for e in fixture['result']['events'] if e['kind'] == 'decision')
+            page.evaluate('(index)=>seek(index+1)', decision_index)
+            page.locator(f'[data-event="{decision_index}"]').click()
+            expect(page.locator('#track-lot')).to_be_visible()
             assert not errors, errors
             context.close()
+        # Every currently emitted kind supports deferred row and tab inspection.
+        # This synthetic display fixture supplies only consumer-required fields.
+        context = browser.new_context(locale=language, viewport={'width': 320, 'height': 844})
+        context.add_init_script('''const saved=%s;
+          localStorage.setItem('factory-studio.public.source.v1',saved.source);
+          localStorage.setItem('factory-studio.public.replay.v1',JSON.stringify(saved));
+          window.createdWorkers=0;window.Worker=class {constructor(){createdWorkers++;throw Error('unexpected Worker')}};
+        ''' % json.dumps(all_kinds))
+        page = context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+        page.goto(base);page.wait_for_function('()=>S.statusMessage?.code==="public_ready"')
+        for event in all_kinds['result']['events']:
+            page.evaluate('()=>{closeInspector();selectTab("events");seek(S.result.events.length)}')
+            page.locator(f'[data-event="{event["index"]}"]').click()
+            assert page.evaluate('S.selected.type==="event"')
+        page.evaluate('closeInspector()')
+        for tab in ['allocations','results','wip','orders','operations','data','lots','utilization','scenarios','events']:
+            page.locator(f'[data-tab="{tab}"]').click()
+        assert page.evaluate('createdWorkers===0 && S.valid')
+        assert not errors, errors
+        context.close()
         # Hold the payload request; progress must exist while restoration awaits it.
         context = browser.new_context(locale=language, viewport={'width': 320, 'height': 844})
         pending = []
@@ -80,6 +110,13 @@ with sync_playwright() as p:
         for replacement in [{'lot': None}, {'checks': [None]}]:
             events = [dict(fixture['result']['events'][0], **replacement), *fixture['result']['events'][1:]]
             malformed.append(dict(fixture, result=dict(fixture['result'], events=events)))
+        for field in ['checks', 'candidates']:
+            broken = deepcopy(fixture)
+            del next(event for event in broken['result']['events'] if event['kind'] == 'decision')[field]
+            malformed.append(broken)
+        broken = deepcopy(fixture)
+        next(event for event in broken['result']['events'] if event['kind'] == 'machine_state')['transition'] = {}
+        malformed.append(broken)
         for source, replay in [
             (fixture['source'], None),
             (fixture['source'], dict(fixture, source='wrong source')),
