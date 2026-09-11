@@ -10,7 +10,7 @@ Workers instead of promising zero total Workers after every action.
 
 | Role | Maximum while active | Expected after the work settles | Lifetime |
 | --- | ---: | ---: | --- |
-| `interactive` | 1 | 1 after first initialization; 0 before use or after Stop/Reset/error/timeout/pagehide | Reused by edit validation, synchronization, and Run |
+| `interactive` | 1 | 1 after first initialization; 0 before use or after Stop/Reset/Worker failure/timeout/pagehide | Reused by edit validation, synchronization, and Run |
 | `experiment` | 2 | 0 | One isolated Python runtime per experiment lane |
 | data import | 1 | 0 | One `/data-worker.js` owned by one import preview/apply operation |
 
@@ -26,9 +26,12 @@ the warm runtime stays resident. Before every non-initialization reply,
 `browser-worker.js` deletes the transient operation, source, seed, and model
 bridge globals and runs Python garbage collection. The reply carries
 `resources.idle_reclaimed`; `BrowserPythonRuntime.resourceSnapshot()` records
-the acknowledgement count and last reclamation. Stop, Reset, native Worker
-failure, initialization/execution timeout, and pagehide terminate the target and
-clear pending requests.
+the acknowledgement count and last reclamation. Handled Python parse, model,
+or execution errors reclaim request memory and retain the ready interactive
+target for a warm correction and retry. Stop, Reset, native Worker failure,
+initialization/execution timeout, and pagehide terminate the target and clear
+pending requests. Page teardown also invalidates an experiment that is still
+starting and cancels all active experiment lanes and data import work.
 
 ## Automated measurement
 

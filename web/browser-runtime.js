@@ -22,7 +22,7 @@ const factoryWorkerResources = (() => {
   return Object.freeze({
     allocate(runtime) {
       const rule = FACTORY_WORKER_RESOURCE_CONTRACT[runtime.role];
-      if (!rule || live[runtime.role].size >= rule.maximum) {
+      if (!rule || live[runtime.role].has(runtime) || live[runtime.role].size >= rule.maximum) {
         throw Object.assign(new Error(`Worker resource limit exceeded for ${runtime.role}`), {code: "browser_resource_limit"});
       }
       runtime.resourceId = ++serial;
@@ -61,6 +61,10 @@ class BrowserPythonRuntime {
   }
 
   createWorker() {
+    // One runtime owns at most one physical Worker. Returning the existing
+    // initialization promise keeps direct/reentrant callers on that owner and
+    // prevents a Worker reference from being overwritten outside the ledger.
+    if (this.worker) return this.ready;
     factoryWorkerResources.allocate(this);
     const rule = FACTORY_WORKER_RESOURCE_CONTRACT[this.role];
     let worker;

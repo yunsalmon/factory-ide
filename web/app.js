@@ -1477,6 +1477,7 @@ function persistReplay() {
 }
 window.addEventListener("pagehide", () => {
   persistReplay();
+  cancelExperiment();
   dataWorkerStop(DATA.worker);
   browserRuntime?.stop();
 });

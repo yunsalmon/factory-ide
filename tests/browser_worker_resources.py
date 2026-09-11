@@ -67,7 +67,9 @@ with sync_playwright() as playwright:
 
     def worker_targets():
         targets = browser_cdp.send('Target.getTargets')['targetInfos']
-        return [target for target in targets if target['type'] == 'worker' and ('/browser-worker.js' in target['url'] or '/data-worker.js' in target['url'])]
+        # This fresh browser/context owns no unrelated dedicated Workers. Count
+        # every target, including a blank URL while an entry script is loading.
+        return [target for target in targets if target['type'] == 'worker']
 
     def wait_targets(expected, timeout=10):
         deadline = time.monotonic() + timeout
@@ -108,6 +110,48 @@ with sync_playwright() as playwright:
     # validation, including the idle-memory acknowledgement before every reply.
     page.evaluate('browserRuntime.parse(S.source)')
     wait_targets(1, 30)
+    creation_count = page.evaluate('__workerResourceAudit.created.length')
+    idempotence = page.evaluate('''()=>{
+      const worker=browserRuntime.worker,ready=browserRuntime.ready;
+      const first=browserRuntime.createWorker(),second=browserRuntime.createWorker();
+      return {sameWorker:browserRuntime.worker===worker,sameReady:first===ready&&second===ready,
+        ledger:factoryWorkerResources.snapshot(),created:__workerResourceAudit.created.length};
+    }''')
+    assert idempotence == {
+        'sameWorker': True,
+        'sameReady': True,
+        'ledger': {'contractVersion': 1, 'interactive': 1, 'experiment': 0, 'data': 0, 'total': 1},
+        'created': creation_count,
+    }, idempotence
+    wait_targets(1)
+
+    # Real application-level validations may overlap with debounced validation.
+    # Every pair must retain its own Pyodide bridge values and cleanup.
+    concurrent_pairs = []
+    for _ in range(5):
+        concurrent_pairs.append(page.evaluate('''async()=>{
+          const settled=await Promise.allSettled([applyCode(true),applyCode(true)]);
+          return {values:settled.map(row=>row.status==='fulfilled'?row.value:row.reason?.message),
+            valid:S.valid,error:S.parseError,state:browserRuntime.state};
+        }'''))
+    assert all(row == {'values': [True, True], 'valid': True, 'error': '', 'state': 'ready'} for row in concurrent_pairs), concurrent_pairs
+    wait_targets(1)
+
+    # A handled Python/source error reclaims its request globals but keeps the
+    # count-bounded warm target ready for a successful correction.
+    error_reclaims = page.evaluate('browserRuntime.idleReclaims')
+    handled_error = page.evaluate('''async()=>{
+      let rejected=false;try{await browserRuntime.parse('MODEL = {')}catch{rejected=true}
+      const afterError={rejected,state:browserRuntime.state,ledger:factoryWorkerResources.snapshot()};
+      const recovered=await browserRuntime.parse(S.source);
+      return {afterError,recovered:!!recovered?.model,state:browserRuntime.state};
+    }''')
+    assert handled_error == {
+        'afterError': {'rejected': True, 'state': 'ready', 'ledger': {'contractVersion': 1, 'interactive': 1, 'experiment': 0, 'data': 0, 'total': 1}},
+        'recovered': True,
+        'state': 'ready',
+    }, handled_error
+    assert page.evaluate('browserRuntime.idleReclaims') == error_reclaims + 2
     warm = []
     reclaims_before = page.evaluate('browserRuntime.idleReclaims')
     for _ in range(5):
@@ -177,6 +221,9 @@ with sync_playwright() as playwright:
 
     result = {
         'contract': page.evaluate('FACTORY_WORKER_RESOURCE_CONTRACT'),
+        'idempotent_create': idempotence,
+        'concurrent_apply_pairs': concurrent_pairs,
+        'handled_error_recovery': handled_error,
         'warm_validation_ms': warm,
         'warm_validation_p95_ms': warm_p95,
         'idle_reclaims': page.evaluate('browserRuntime.idleReclaims'),
@@ -192,11 +239,31 @@ with sync_playwright() as playwright:
         'api_requests': [url for url in requests if '/api/' in url],
         'status': 'PASS',
     }
-    page.evaluate('''()=>addEventListener('pagehide',()=>sessionStorage.setItem('factory-worker-pagehide-audit',JSON.stringify({ledger:factoryWorkerResources.snapshot(),live:__workerResourceAudit.live})))''')
+    # Navigate while all three roles are active. The application pagehide
+    # handler must synchronously invalidate startup and stop every owned Worker.
+    page.evaluate('''()=>{
+      const source=S.source+'\\ndef processing_time(machine,lot,ctx):\\n    while True: pass\\n';
+      window.__pagehideRunner=new ExperimentRunner();
+      EXPERIMENTS.runner=__pagehideRunner;
+      window.__pagehideExperiment=(async()=>{
+        const definition=await experimentDefinition('pagehide','',source,__resourceModel,[31,32,33,34],2);
+        return __pagehideRunner.run(definition);
+      })();
+    }''')
+    page.wait_for_function('()=>__pagehideRunner.workers.size===2&&[...__pagehideRunner.workers].every(worker=>worker.state==="running")', timeout=60000)
+    page.evaluate('''()=>{
+      DATA.text='id\\n'+('x'.repeat(300)+'\\n').repeat(19000);DATA.format='csv';DATA.table='machines';runDataWorker(true);
+    }''')
+    teardown_active = page.evaluate('''()=>({ledger:factoryWorkerResources.snapshot(),runnerActive:__pagehideRunner.active,
+      runnerWorkers:__pagehideRunner.workers.size,dataActive:DATA.worker!==null,live:{...__workerResourceAudit.live}})''')
+    assert teardown_active['ledger'] == {'contractVersion': 1, 'interactive': 1, 'experiment': 2, 'data': 1, 'total': 4}, teardown_active
+    assert teardown_active['runnerActive'] and teardown_active['runnerWorkers'] == 2 and teardown_active['dataActive'], teardown_active
+    result['active_before_pagehide'] = teardown_active
+    page.evaluate('''()=>addEventListener('pagehide',()=>sessionStorage.setItem('factory-worker-pagehide-audit',JSON.stringify({ledger:factoryWorkerResources.snapshot(),live:__workerResourceAudit.live,runnerWorkers:__pagehideRunner.workers.size,dataActive:DATA.worker!==null})))''')
     page.goto(BASE + '/version.json')
     pagehide = json.loads(page.evaluate("sessionStorage.getItem('factory-worker-pagehide-audit')"))
     wait_targets(0, 10)
-    assert pagehide == {'ledger': {'contractVersion': 1, 'interactive': 0, 'experiment': 0, 'data': 0, 'total': 0}, 'live': {'interactive': 0, 'experiment': 0, 'other': 0}}, pagehide
+    assert pagehide == {'ledger': {'contractVersion': 1, 'interactive': 0, 'experiment': 0, 'data': 0, 'total': 0}, 'live': {'interactive': 0, 'experiment': 0, 'other': 0}, 'runnerWorkers': 0, 'dataActive': False}, pagehide
     result['pagehide'] = pagehide
     result['pagehide_worker_targets'] = len(worker_targets())
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)

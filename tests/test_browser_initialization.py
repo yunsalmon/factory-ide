@@ -20,8 +20,9 @@ class InitializationTests(unittest.TestCase):
           window.setTimeout=(fn,delay)=>{const id=++serial;timers.set(id,{fn,at:now+delay});return id};
           window.clearTimeout=id=>timers.delete(id);
           window.advance=ms=>{now+=ms;for(const [id,t] of [...timers])if(t.at<=now){timers.delete(id);t.fn()}};
+          window.fakeWorkers=[];
           window.Worker=class {
-            constructor(...args){this.args=args;this.handlers={};this.messages=[];this.dead=false;}
+            constructor(...args){this.args=args;this.handlers={};this.messages=[];this.dead=false;fakeWorkers.push(this);}
             addEventListener(kind,fn){this.handlers[kind]=fn;}
             postMessage(message){this.messages.push(message);}
             terminate(){this.dead=true;}
@@ -126,6 +127,28 @@ class InitializationTests(unittest.TestCase):
         self.assertEqual(result['stopped']['total'], 0)
         self.assertTrue(result['names'][0].startswith('factory-interactive-runtime-'))
         self.assertTrue(all(name.startswith('factory-experiment-runtime-') for name in result['names'][1:]))
+
+    def test_repeated_create_is_idempotent_and_stop_releases_the_only_worker(self):
+        result = self.page.evaluate('''async()=>{
+          const runtime=new BrowserPythonRuntime({role:'experiment'});
+          const first=runtime.createWorker(),worker=runtime.worker;
+          const second=runtime.createWorker();
+          if(first!==second||runtime.worker!==worker)throw Error('createWorker replaced its owner');
+          worker.reply({id:worker.messages[0].id,type:'ready',runtime:{python:'3.12.7'}});
+          await Promise.all([first,second]);
+          const third=runtime.createWorker();
+          const sameReady=third===runtime.ready,active=factoryWorkerResources.snapshot();
+          const firstStop=runtime.stop(),secondStop=runtime.stop();
+          return {sameReady,created:fakeWorkers.length,active,
+            firstStop,secondStop,dead:fakeWorkers.map(worker=>worker.dead),settled:factoryWorkerResources.snapshot()};
+        }''')
+        self.assertTrue(result['sameReady'])
+        self.assertEqual(result['created'], 1)
+        self.assertEqual(result['active']['experiment'], 1)
+        self.assertTrue(result['firstStop'])
+        self.assertFalse(result['secondStop'])
+        self.assertEqual(result['dead'], [True])
+        self.assertEqual(result['settled']['total'], 0)
 
     def test_idle_reclamation_acknowledgement_is_counted(self):
         result = self.page.evaluate('''async()=>{

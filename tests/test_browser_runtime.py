@@ -55,6 +55,8 @@ class BrowserRuntimeTests(unittest.TestCase):
         self.assertIn('factoryWorkerResources.release(this)', controller)
         self.assertIn('reclaimRequestMemory()', worker)
         self.assertIn('pyodide.globals.delete(name)', worker)
+        self.assertIn('let requestQueue = Promise.resolve()', worker)
+        self.assertIn('requestQueue = requestQueue.then(', worker)
         self.assertIn('message.resources?.idle_reclaimed', controller)
 
     def test_runtime_manifest_records_every_download(self):

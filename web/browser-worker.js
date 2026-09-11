@@ -228,4 +228,14 @@ async function handle(message) {
   send({...outgoing, ...(resources ? {resources} : {})});
 }
 
-self.addEventListener("message", (event) => handle(event.data));
+// Pyodide exposes one interpreter and one globals mapping per Worker. Keep a
+// single request queue so bridge globals remain owned by one request through
+// execution and reclamation. The rejection arm also keeps a surprising send
+// failure from poisoning later work.
+let requestQueue = Promise.resolve();
+self.addEventListener("message", (event) => {
+  requestQueue = requestQueue.then(
+    () => handle(event.data),
+    () => handle(event.data),
+  );
+});
