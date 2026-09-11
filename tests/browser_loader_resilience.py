@@ -19,7 +19,12 @@ with sync_playwright() as playwright:
     context = browser.new_context(locale='ja', viewport={'width': 320, 'height': 900})
     context.route('**/locales-ja-1.json', lambda route: route.abort('failed'))
     context.route('**/locales.json', lambda route: route.abort('failed'))
-    page = context.new_page(); page.goto(base); ready(page)
+    page = context.new_page()
+    page.add_init_script("""addEventListener('DOMContentLoaded',()=>{
+      window.issue46InitialTraceVisibility=getComputedStyle(document.querySelector('.trace-panel')).contentVisibility;
+    })""")
+    page.goto(base); ready(page)
+    assert page.evaluate('issue46InitialTraceVisibility') == 'hidden'
     assert page.locator('[data-boot-stage]').count() == 0
     assert page.locator('#code').is_visible() and page.locator('#graph-viewport').is_visible()
     assert page.locator('#loader-error').get_attribute('role') == 'alert'
