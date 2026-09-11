@@ -49,6 +49,14 @@ def build(output, revision, runtime_dir=None):
     (output / 'version.json').write_text(json.dumps(version))
     (output / 'healthz').write_text('ok\n')
     (output / 'locales.js').write_text('const translations = ' + (ROOT / 'web/locales.json').read_text() + ';\n')
+    locale_bundle = json.loads((ROOT / 'web/locales.json').read_text())
+    for language, messages in locale_bundle.items():
+        (output / f'locales-{language}.json').write_text(json.dumps(messages, ensure_ascii=False))
+        items = list(messages.items())
+        chunk_size = (len(items) + 3) // 4
+        for index in range(4):
+            chunk = dict(items[index * chunk_size:(index + 1) * chunk_size])
+            (output / f'locales-{language}-{index}.json').write_text(json.dumps(chunk, ensure_ascii=False))
     html = (output / 'index.html').read_text().replace('<html lang="ko">', '<html lang="ko" data-mode="public">')
     for before, after in [('local','public_title'),('ui_211','public_runtime'),('ui_212','public_runtime_detail'),('ui_241','public_storage'),('live_trace','public_trace'),('ui_231','public_help'),('ui_12','public_source'),('ui_227','public_shortcut')]:
         html = html.replace(f'data-i18n="{before}"', f'data-i18n="{after}"')

@@ -17,8 +17,9 @@ with sync_playwright() as p:
                 assert time.monotonic()<deadline,expression
                 page.wait_for_timeout(30)
         wait('Boolean(window.factoryStudio?.getState().result)')
+        assert page.evaluate('editor === null')
         for action in ['stop','reset']:
-            page.evaluate('()=>editor.setValue(editor.getValue()+"\\n# cold connection\\n")')
+            page.evaluate('''()=>{const field=document.querySelector('#code');field.value+='\\n# cold connection\\n';field.dispatchEvent(new Event('input',{bubbles:true}))}''')
             wait('S.runtimeState === "loading"')
             assert page.locator('#runtime-status').inner_text()==page.evaluate('tr("public_runtime_loading")')
             assert page.locator('#run-button').inner_text()==page.evaluate('tr("ui_145")')
@@ -27,7 +28,7 @@ with sync_playwright() as p:
             assert page.evaluate('testWorkers.every(w=>w.dead) && browserRuntime.pending.size===0')
             if action=='reset':assert page.evaluate('S.valid && S.source===S.example')
             assert page.locator('#run-button').inner_text()==page.evaluate('tr("ui_152")')
-        page.evaluate('()=>{browserRuntime.initTimeout=10;editor.setValue(editor.getValue()+"\\n# timeout\\n")}')
+        page.evaluate('''()=>{browserRuntime.initTimeout=10;const field=document.querySelector('#code');field.value+='\\n# timeout\\n';field.dispatchEvent(new Event('input',{bubbles:true}))}''')
         wait('S.runtimeState === "init_error"')
         wait('S.parseErrorDetail?.code === "public_init_timeout"')
         assert page.locator('#runtime-status').inner_text()==page.evaluate('tr("public_init_error")')
@@ -49,7 +50,8 @@ with sync_playwright() as p:
                 assert time.monotonic()<deadline,expression
                 page.wait_for_timeout(30)
         wait('Boolean(window.factoryStudio?.getState().result)')
-        page.evaluate('()=>editor.setValue(editor.getValue()+"\\n# entry load failure\\n")')
+        assert page.evaluate('editor === null')
+        page.evaluate('''()=>{const field=document.querySelector('#code');field.value+='\\n# entry load failure\\n';field.dispatchEvent(new Event('input',{bubbles:true}))}''')
         wait('S.runtimeState === "init_error"')
         wait('S.parseErrorDetail?.code === "public_init_error"')
         assert page.locator('#runtime-status').inner_text()==page.evaluate('tr("public_init_error")')

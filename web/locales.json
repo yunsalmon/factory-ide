@@ -266,6 +266,10 @@
     "ui_264": "처음으로",
     "ui_265": "재생 / 일시정지",
     "ui_266": "다음 이벤트",
+    "event_page_label": "이벤트 기록 페이지",
+    "event_page_newer": "최신 쪽",
+    "event_page_older": "이전 기록",
+    "event_page_status": "{0} / {1} 페이지",
     "ui_267": "재생 속도",
     "ui_268": "이벤트 타임라인",
     "ui_269": "속성 패널 닫기",
@@ -799,6 +803,8 @@
     "graph_buffer_unavailable": "버퍼 {0}의 기록된 재고를 확인할 수 없습니다.",
     "graph_assigned_lot": "예약·연결 로트: {0}",
     "editor_keyboard_help": "Tab / Shift+Tab: 다음 / 이전 컨트롤로 이동합니다. Ctrl 또는 ⌘ + ] / [: 들여쓰기 / 내어쓰기. Ctrl 또는 ⌘ + Enter: 실행. 코드를 건너뛰려면 아래 결과 버튼을 사용하세요.",
+    "editor_enhance": "고급 편집기 사용",
+    "editor_enhance_cost": "선택 시 편집기 모듈을 한 번 불러옵니다.",
     "editor_skip_results": "결과로 건너뛰기"
   },
   "en": {
@@ -1068,6 +1074,10 @@
     "ui_264": "Rewind",
     "ui_265": "Play / pause",
     "ui_266": "Next event",
+    "event_page_label": "Event log pages",
+    "event_page_newer": "Newer",
+    "event_page_older": "Older",
+    "event_page_status": "Page {0} of {1}",
     "ui_267": "Playback speed",
     "ui_268": "Event timeline",
     "ui_269": "Close properties panel",
@@ -1601,6 +1611,8 @@
     "graph_buffer_unavailable": "Recorded inventory for buffer {0} is unavailable.",
     "graph_assigned_lot": "Reserved / associated lot: {0}",
     "editor_keyboard_help": "Tab / Shift+Tab: move to the next / previous control. Ctrl or ⌘ + ] / [: indent / unindent. Ctrl or ⌘ + Enter: run. Use the results button below to skip the code.",
+    "editor_enhance": "Enable advanced editor",
+    "editor_enhance_cost": "Loads the editor modules once when selected.",
     "editor_skip_results": "Skip to results"
   },
   "ja": {
@@ -1870,6 +1882,10 @@
     "ui_264": "最初へ",
     "ui_265": "再生／一時停止",
     "ui_266": "次のイベント",
+    "event_page_label": "イベント記録ページ",
+    "event_page_newer": "新しい記録",
+    "event_page_older": "以前の記録",
+    "event_page_status": "{0} / {1}ページ",
     "ui_267": "再生速度",
     "ui_268": "イベントタイムライン",
     "ui_269": "属性パネルを閉じる",
@@ -2403,6 +2419,8 @@
     "graph_buffer_unavailable": "バッファ {0} の記録済み在庫は不明です。",
     "graph_assigned_lot": "予約・関連ロット: {0}",
     "editor_keyboard_help": "Tab / Shift+Tab: 次 / 前の操作項目へ移動。Ctrl または ⌘ + ] / [: インデント / 解除。Ctrl または ⌘ + Enter: 実行。コードを飛ばすには下の結果ボタンを使います。",
+    "editor_enhance": "高機能エディターを使用",
+    "editor_enhance_cost": "選択するとエディターモジュールを一度読み込みます。",
     "editor_skip_results": "結果へスキップ"
   }
 }

@@ -394,6 +394,28 @@ h1 {
   overflow: hidden;
   box-shadow: 0 3px 7px #304b3510;
 }
+[data-boot-stage] {
+  content-visibility: hidden;
+  contain-intrinsic-size: auto 300px;
+}
+.loader-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid #b7784f;
+  border-radius: 7px;
+  background: #fff7ef;
+  color: #693917;
+}
+.enhance-cost {
+  flex: 1 1 100%;
+  order: 5;
+  color: var(--muted);
+  font-size: 10px;
+}
 .panel-header {
   height: 45px;
   display: flex;
@@ -427,12 +449,14 @@ h1 {
 }
 .editor-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 3px 8px;
   padding: 7px 10px;
   border-bottom: 1px solid #edf0ea;
   font-size: 9px;
-  height: 32px;
+  min-height: 32px;
 }
 .editor-toolbar button {
   font-size: 9px;
@@ -669,6 +693,8 @@ h1 {
   font-size: 7px;
 }
 .trace-panel {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 310px;
   min-height: 255px;
 }
 .trace-top {
@@ -759,6 +785,7 @@ h1 {
   height: 196px;
   overflow: auto;
 }
+.event-pages { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 6px 12px; font-size: 10px; }
 table {
   border-collapse: collapse;
   width: 100%;

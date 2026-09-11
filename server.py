@@ -102,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
                 job = JOBS.get(path.rsplit('/', 1)[1])
                 result = {k: v for k, v in job.items() if k in ('status', 'payload')} if job else None
             return self.send(200 if result else 404, result or {'error': message('message_42')})
-        assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/i18n.js': ('i18n.js', 'text/javascript'), '/allocation-results.js': ('allocation-results.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+        assets = {'/': ('index.html', 'text/html'), '/loader.js': ('loader.js', 'text/javascript'), '/app.js': ('app.js', 'text/javascript'), '/i18n.js': ('i18n.js', 'text/javascript'), '/allocation-results.js': ('allocation-results.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
         assets.update({f'/{name}': (name, 'text/javascript') for name in ('inventory-projection.js', 'inventory-ui.js', 'scenario-comparison.js', 'scenario-ui.js')})
         assets.update({f'/{name}': (name, 'text/javascript') for name in ('order-projection.js', 'order-ui.js')})
         assets.update({f'/{name}': (name, 'text/javascript') for name in ('browser-runtime.js','browser-worker.js','experiment-core.js','experiment-ui.js')})

@@ -23,6 +23,8 @@ with sync_playwright() as p:
                 if not enhanced:context.route('**/vendor/codemirror/*.js',lambda route:route.abort())
                 page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
                 page.goto(base);page.wait_for_function('()=>S.valid');page.locator('#language').select_option(lang)
+                if enhanced:
+                    page.evaluate('loadEnhancedEditor()');page.wait_for_function('()=>Boolean(editor)')
                 assert page.evaluate('Boolean(editor)')==enhanced
                 field=page.locator('.CodeMirror textarea' if enhanced else '#code')
                 expect(field).to_have_attribute('aria-describedby','editor-keyboard-help')

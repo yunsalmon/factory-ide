@@ -21,6 +21,7 @@ jobs:
       - run: python tests/browser_allocations.py
       - run: python tests/browser_allocation_states.py
       - run: python tests/browser_graph_states.py
+      - run: python tests/browser_final_view_cursor.py
       - run: python tests/browser_inventory.py
       - run: python tests/browser_orders.py
       - run: python tests/browser_scenarios.py
@@ -53,5 +54,7 @@ jobs:
       - run: python tests/browser_runtime_delivery.py http://127.0.0.1:13333
       - run: python tests/browser_initialization.py http://127.0.0.1:13333
       - run: python tests/browser_worker_resources.py http://127.0.0.1:13333 artifacts/worker-resources.json
+      - run: python tests/browser_loader_resilience.py http://127.0.0.1:13333
       - run: python tests/browser_data.py http://127.0.0.1:13333
       - run: python tests/browser_public_import.py http://127.0.0.1:13333
+      - run: python tests/browser_small_interactions.py http://127.0.0.1:13333 artifacts/small-interactions.json

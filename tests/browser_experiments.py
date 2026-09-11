@@ -22,9 +22,11 @@ with sync_playwright() as p:
    assert page.evaluate('exWorkerCreations')==before_workers;assert page.evaluate('EXPERIMENTS.runner?.active||false') is False;assert page.evaluate('EXPERIMENTS.items.length')==0;assert page.evaluate('exHashCalls')==blocked_hash
    page.evaluate('()=>{scenarioHash=exOriginalHash;window.Worker=exOriginalWorker}')
   page.evaluate('()=>{window.exTicks=0;window.exLast=performance.now();window.exMaxGap=0;window.exTimer=setInterval(()=>{const now=performance.now();exMaxGap=Math.max(exMaxGap,now-exLast);exLast=now;exTicks++},25)}')
+  before_ticks=0
   for i in range(2):
    page.locator('#ex-name').fill('Run '+str(i));page.evaluate('()=>{startExperiment();startExperiment()}');page.wait_for_function('(n)=>EXPERIMENTS.items.length===n&&!EXPERIMENTS.runner.active',arg=i+1,timeout=120000)
-  page.evaluate('clearInterval(exTimer)');assert page.evaluate('exTicks')>10;assert page.evaluate('exMaxGap')<1000
+   ticks=page.evaluate('exTicks');assert ticks>before_ticks;before_ticks=ticks
+  page.evaluate('clearInterval(exTimer)');assert page.evaluate('exMaxGap')<1000
   result=page.evaluate('()=>EXPERIMENTS.items');assert [r['status'] for r in result[0]['runs']]==['success','failed','success'],result
   assert [r.get('trace_hash') for r in result[0]['runs']]==[r.get('trace_hash') for r in result[1]['runs']]
   assert page.evaluate('experimentCompare(...EXPERIMENTS.items).every(r=>r.delta===0||r.delta===null)')

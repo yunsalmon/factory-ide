@@ -8,31 +8,7 @@
     <link rel="stylesheet" href="/vendor/codemirror/dialog.css" />
     <link rel="stylesheet" href="/vendor/codemirror/show-hint.css" />
     <link rel="stylesheet" href="/style.css" />
-    <script src="/vendor/codemirror/codemirror.js" defer></script>
-    <script src="/vendor/codemirror/python.js" defer></script>
-    <script src="/vendor/codemirror/matchbrackets.js" defer></script>
-    <script src="/vendor/codemirror/comment.js" defer></script>
-    <script src="/vendor/codemirror/searchcursor.js" defer></script>
-    <script src="/vendor/codemirror/dialog.js" defer></script>
-    <script src="/vendor/codemirror/search.js" defer></script>
-    <script src="/vendor/codemirror/show-hint.js" defer></script>
-    <script src="/locales.js" defer></script>
-    <script src="/i18n.js" defer></script>
-    <script src="/allocation-results.js" defer></script>
-    <script src="/inventory-projection.js" defer></script>
-    <script src="/inventory-ui.js" defer></script>
-    <script src="/browser-runtime.js" defer></script>
-    <script src="/order-projection.js" defer></script>
-    <script src="/order-ui.js" defer></script>
-    <script src="/operations.js" defer></script>
-    <script src="/graph-state.js" defer></script>
-    <script src="/scenario-comparison.js" defer></script>
-    <script src="/scenario-ui.js" defer></script>
-    <script src="/data-core.js" defer></script>
-    <script src="/data-ui.js" defer></script>
-    <script src="/experiment-core.js" defer></script>
-    <script src="/experiment-ui.js" defer></script>
-    <script src="/app.js" defer></script>
+    <script src="/loader.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -103,20 +79,22 @@
           </div>
         </div>
         <div class="studio" id="studio">
-          <section class="panel editor-panel">
+          <section class="panel editor-panel" data-boot-stage>
             <div class="panel-header">
               <span><span class="py">Py</span> factory_model.py</span
               ><span class="subtle">Python</span>
             </div>
             <div class="editor-toolbar">
               <span id="sync-status" class="good"><span data-i18n="ui_12">● 코드 ↔ 공정도 동기화</span></span
+              ><button id="enhance-editor" class="quiet"><span data-i18n="editor_enhance">고급 편집기 사용</span></button
+              ><span class="enhance-cost" data-i18n="editor_enhance_cost">선택 시 편집기 모듈을 한 번 불러옵니다.</span
               ><button id="apply-code" class="quiet"><span data-i18n="ui_226">공정도 갱신 ↗</span></button>
             </div>
             <div class="editor-keyboard-help">
               <p id="editor-keyboard-help" data-i18n="editor_keyboard_help"></p>
               <button type="button" id="editor-skip-results" data-i18n="editor_skip_results"></button>
             </div>
-            <div class="code-wrap">
+            <div class="code-wrap" data-boot-stage>
               <pre id="line-numbers" aria-hidden="true">1</pre>
               <textarea
                 id="code"
@@ -131,7 +109,7 @@
               ><span>UTF-8 <span class="divider">|</span><span data-i18n="ui_227"> Ctrl+Enter 실행</span></span>
             </div>
           </section>
-          <section class="panel graph-panel">
+          <section class="panel graph-panel" data-boot-stage>
             <div class="panel-header">
               <span><span data-i18n="ui_228">▦ &nbsp; 공정 플로우 </span><span class="badge soft"><span data-i18n="live_trace">LIVE TRACE</span></span></span>
               <div>
@@ -147,7 +125,7 @@
               ><span id="mode-label"><span data-i18n="ui_15">PULL · 후공정 선택</span></span>
             </div>
             <p id="graph-scope" class="graph-scope" role="status"></p>
-            <div class="graph-viewport" id="graph-viewport"><div id="graph"></div></div>
+            <div class="graph-viewport" id="graph-viewport" data-boot-stage><div id="graph"></div></div>
             <div class="graph-footer">
               <span id="graph-caption"><span data-i18n="ui_231">머신 또는 경로를 클릭해 속성과 규칙을 편집하세요.</span></span>
               <div>
@@ -158,7 +136,7 @@
             </div>
           </section>
         </div>
-        <section class="panel trace-panel">
+        <section class="panel trace-panel" data-boot-stage>
           <div class="trace-top">
             <div class="tabs">
               <button class="active" data-tab="events"><span data-i18n="ui_233">
@@ -201,7 +179,7 @@
               ><input type="checkbox" id="break-decision" /><span data-i18n="ui_239">선택마다 멈춤</span></label
             >
           </div>
-          <div id="trace-content"></div>
+          <div id="trace-content" data-boot-stage></div>
         </section>
       </main>
       <aside id="inspector" class="inspector" hidden>
