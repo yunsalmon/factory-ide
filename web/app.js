@@ -660,9 +660,11 @@ function seek(cursor, preserveComparison = false) {
     S.comparison = event?.kind === "decision" || event?.kind === "blocked" ? event.index : allocation?.decision_index ?? S.result?.events.slice(0, S.cursor).findLast(e => ["decision", "blocked"].includes(e.kind))?.index;
   }
   scheduleReplayPersistence();
-  const graphView = graphProjection(), inventoryView = S.tab === "wip" ? wipProjection() : null;
-  renderPlayback(graphView);
-  renderMetrics(graphView);
+  const graphView = graphProjection(),
+    cursorView = graphView.finalView ? stateAt() : graphView,
+    inventoryView = S.tab === "wip" ? wipProjection() : null;
+  renderPlayback(cursorView);
+  renderMetrics(cursorView);
   renderGraph(inventoryView, graphView);
   renderTrace(inventoryView);
   if (S.selected?.type === "lot") inspectLot(S.selected.id, false);

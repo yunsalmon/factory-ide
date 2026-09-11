@@ -21,6 +21,7 @@ jobs:
       - run: python tests/browser_allocations.py
       - run: python tests/browser_allocation_states.py
       - run: python tests/browser_graph_states.py
+      - run: python tests/browser_final_view_cursor.py
       - run: python tests/browser_inventory.py
       - run: python tests/browser_orders.py
       - run: python tests/browser_scenarios.py
