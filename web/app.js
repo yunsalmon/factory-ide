@@ -1326,6 +1326,62 @@ if (window.CodeMirror) {
   editor.on("cursorActivity", updateEditor);
   new ResizeObserver(() => editor.refresh()).observe($(".editor-panel"));
 }
+// Storage is untrusted input. Check the shapes used by replay consumers before
+// adopting a snapshot; this is a display contract, not a re-execution or proof
+// that a locally edited trace is authentic. Keep the check linear in trace size.
+function canRestorePublicReplay(saved, source) {
+  const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  const text = value => typeof value === "string" && value.length > 0;
+  const nullableText = value => value == null || typeof value === "string";
+  const lot = value => record(value) && text(value.id) && text(value.state) &&
+    text(value.location) && typeof value.product === "string" &&
+    (value.placement == null || (record(value.placement) && text(value.placement.kind) && text(value.placement.id)));
+  const dictionary = (value, check) => record(value) && Object.values(value).every(check);
+  const machine = value => record(value) && text(value.state) && nullableText(value.lot);
+  const snapshots = value => record(value) && dictionary(value.lots, lot) && dictionary(value.machines, machine) &&
+    (value.machine_operations === undefined || dictionary(value.machine_operations, machine)) &&
+    (value.buffers === undefined || dictionary(value.buffers, b => record(b) && text(b.id) && text(b.at) &&
+      Array.isArray(b.contents) && b.contents.every(text))) &&
+    (value.resources === undefined || dictionary(value.resources, r => record(r) &&
+      Array.isArray(r.holders) && r.holders.every(record) && Array.isArray(r.waiters) && r.waiters.every(record)));
+  try {
+    if (!record(saved) || saved.source !== source || !record(saved.result)) return false;
+    const result = saved.result, model = result.model;
+    if (!record(model) || validateDataModel(model).length ||
+        model.machines.some(m => typeof m.name !== "string")) return false;
+    scenarioContract(result); // schema, horizon, units, event indexes/times/limit
+    if (!Array.isArray(result.warnings) || !result.warnings.every(v => typeof v === "string") ||
+        (result.warning_messages !== undefined && !Array.isArray(result.warning_messages)) ||
+        !Array.isArray(result.allocations) || !record(result.summary)) return false;
+    if (![result.summary.arrived, result.summary.completed].every(n => Number.isInteger(n) && n >= 0) ||
+        result.summary.completed > result.summary.arrived) return false;
+    // A zero-event snapshot can represent an empty workload, not a truncated
+    // nonempty result with stale summary/allocation records.
+    if (!result.events.length && (result.summary.arrived || result.summary.completed || result.allocations.length)) return false;
+    if (result.initial_state !== undefined && !snapshots(result.initial_state)) return false;
+    for (const event of result.events) {
+      if (!record(event) || !text(event.kind) || !snapshots(event.state_changes) ||
+          (event.lot != null && !lot(event.lot)) || (event.kind === "setup_plan" && !lot(event.lot))) return false;
+    }
+    const routes = new Set(model.routes.map(route => route.id));
+    const destinations = new Set(["OUTPUT", ...model.machines.map(m => m.id)]);
+    for (const allocation of result.allocations) {
+      if (!record(allocation) || !text(allocation.id) || !text(allocation.lot_id) ||
+          !routes.has(allocation.route_id) || !destinations.has(allocation.destination) ||
+          ![allocation.decision_index, allocation.before_cursor, allocation.after_cursor].every(
+            n => Number.isInteger(n) && n >= 0 && n <= result.events.length)) return false;
+    }
+    if (result.order_plan !== undefined && (!Array.isArray(result.order_plan) || result.order_plan.some(
+      order => !record(order) || !text(order.id) || !Array.isArray(order.lots) || order.lots.some(item => !record(item) || !text(item.id))))) return false;
+    if (saved.tab !== undefined && !$$('[data-tab]').some(button => button.dataset.tab === saved.tab)) return false;
+    if (saved.resultsFinal !== undefined && typeof saved.resultsFinal !== "boolean") return false;
+    if (saved.filters !== undefined && (!record(saved.filters) || Object.values(saved.filters).some(v => typeof v !== "string"))) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function boot() {
   try {
     if (PUBLIC_DEMO) {
@@ -1335,7 +1391,6 @@ async function boot() {
       S.example = data.source;
       S.demoResult = copy(data.result);
       S.demoVersion = data.version;
-      let restoredPublicReplay = false;
       let source = data.source;
       try { source = localStorage.getItem("factory-studio.public.source.v1") ?? source; } catch {}
       setSource(source);
@@ -1343,31 +1398,58 @@ async function boot() {
       S.warnings = data.result.warnings; S.warningMessages = data.result.warning_messages;
       const runtime = data.version.browser_runtime;
       $("#demo-version").textContent = `${data.version.source_revision} · trace v${data.result.schema_version} · Pyodide ${runtime.pyodide} · Python ${runtime.python} · SimPy ${runtime.simpy} · ${data.version.trace_sha256}`;
+      const paint = cursor => {
+        $("#project-name").textContent = S.model.name;
+        diagnostics(); renderTree();
+        selectTab(S.result ? S.tab : "console", false);
+        seek(cursor);
+      };
+      let invalidReplay = false;
+      let raw = null;
+      try { raw = localStorage.getItem("factory-studio.public.replay.v1"); } catch {}
       try {
-        const saved = JSON.parse(localStorage.getItem("factory-studio.public.replay.v1"));
-        if (saved?.source === source && saved.result?.schema_version === 2 &&
-            saved.result.model && Array.isArray(saved.result.events)) {
+        const saved = raw === null ? null : JSON.parse(raw);
+        invalidReplay = raw !== null;
+        if (raw !== null && canRestorePublicReplay(saved, source)) {
           S.model = saved.result.model; S.result = saved.result; S.valid = true;
           S.cursor = Number.isInteger(saved.cursor) && saved.cursor >= 0 && saved.cursor <= S.result.events.length ? saved.cursor : 1;
           S.tab = saved.tab || "events";
           S.resultsFinal = saved.resultsFinal || false; S.resultFilters = saved.filters || {};
           S.warnings = S.result.warnings; S.warningMessages = S.result.warning_messages || [];
-          restoredPublicReplay = true;
+          // Rendering/projection is part of adoption. Roll back on any failure
+          // instead of leaving a partially restored snapshot marked as valid.
+          paint(S.cursor);
+          S.valid = true;
+          status({code: "public_ready"});
+          return;
         }
-      } catch {}
+      } catch { invalidReplay = true; }
+      Object.assign(S, {model: data.result.model, result: null, valid: false,
+        cursor: 0, tab: "events", comparison: null, resultsFinal: false, resultFilters: {},
+        warnings: data.result.warnings, warningMessages: data.result.warning_messages});
+      if (invalidReplay) {
+        try { localStorage.removeItem("factory-studio.public.replay.v1"); } catch {}
+        const progress = $("#startup-progress");
+        if (progress) {
+          progress.dataset.i18n = "public_replay_invalid";
+          progress.textContent = tr("public_replay_invalid");
+        }
+        status({code: "public_replay_invalid"});
+        selectTab("console"); renderPlayback(); renderMetrics();
+      }
       // A matching replay already contains its model and execution metadata.
       // Reviewing it must not download Python or re-execute the saved source.
       // Edits and Run still validate through the isolated worker as usual.
-      if (source !== data.source && !restoredPublicReplay) {
-        await applyCode(true);
+      if (source !== data.source || invalidReplay) {
+        const revision = S.revision;
+        if (!await applyCode(true) || revision !== S.revision) return;
+      } else {
+        S.result = copy(data.result); S.valid = true;
       }
-      $("#project-name").textContent = S.model.name;
-      diagnostics(); renderTree();
       // Select the saved tab before seek paints the dashboard once. Otherwise
       // startup renders the graph three times and the saved Results table twice.
-      selectTab(S.result ? S.tab : "console", false);
-      seek(S.result ? (restoredPublicReplay ? S.cursor : 1) : 0);
-      status({code: "public_ready"});
+      paint(S.result ? 1 : 0);
+      status({code: S.result ? "public_ready" : "ui_17"});
       return;
     }
     const data = await api("/api/bootstrap");

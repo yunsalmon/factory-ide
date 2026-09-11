@@ -17,6 +17,25 @@ An empty saved source is preserved. Reset and Stop still invalidate pending
 worker initialization. The source-only fallback necessarily depends on runtime
 availability and is not the saved-result dashboard performance case.
 
+Stored results are structurally checked before adoption: the existing model and
+trace-contract validators check model collections, references, horizon, schema,
+event indices and times. Replay-specific checks cover event/initial snapshots,
+lot and machine records, allocations, warnings, order-plan collections and saved
+view settings. Null event entries and empty/malformed models cannot bypass source
+validation. Empty event arrays are accepted only with zero summary counts and no
+allocations, preserving the zero-work boundary without accepting a truncated
+nonempty trace. This is a display-shape check, not a signature or proof that a
+user-edited local trace is authentic.
+
+Projection/rendering is also part of adoption. If it fails, the candidate is
+discarded and all replay fields are reset before asynchronous source validation.
+A localized message explains that the saved trace could not be restored; the
+source editor and Reset remain usable. Validation produces a checked model, not
+an invented execution result. A later Run generates a new result normally.
+Validation failure, Stop and Reset retain their own outcome rather than being
+overwritten by a false ready status. Unavailable browser storage still permits
+the ordinary precomputed fresh-start path.
+
 ## Reproducible measurement
 
 Build the exact revision with `deploy/Dockerfile`, start an isolated loopback
