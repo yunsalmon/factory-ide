@@ -30,7 +30,7 @@ function renderPlanner() {
     ${p.unassignedLots.length?`<p>${tr("order_legacy",[p.unassignedLots.length])}</p>`:""}
     <div class="order-table-wrap" role="region" tabindex="0" aria-label="${tr("order_title")}"><table id="order-table"><caption>${tr("order_title")}</caption><thead><tr>${columns.map(([label])=>`<th scope="col">${label}</th>`).join("")}</tr></thead><tbody>${p.rows.map((r,i)=>`<tr>${columns.map(([,get],j)=>j?`<td>${esc(orderValue(get(r)))}</td>`:`<th scope="row"><button data-order-row="${i}" aria-pressed="${PLANNER.selected===r.id}">${esc(r.id)}</button></th>`).join("")}</tr>`).join("")}</tbody></table></div>
     ${!p.rows.length?`<p>${tr("order_empty")}</p>`:""}<section id="order-detail" aria-label="${tr("order_detail")}"></section></section>`;
-  $("#order-view").onchange=e=>{PLANNER.finalView=e.target.value==="final";renderPlanner();};
+  $("#order-view").onchange=e=>{PLANNER.finalView=e.target.value==="final";renderPlanner();renderGraph();};
   for(const key of ["progress","risk"])$("#order-"+key).onchange=e=>{PLANNER.filters[key]=e.target.value;renderPlanner();};
   $("#order-search").oninput=e=>{PLANNER.filters.search=e.target.value;renderPlanner();};
   $("#order-reset").onclick=()=>{PLANNER.filters={};renderPlanner();};
