@@ -3,6 +3,8 @@
 Usage: python tests/browser_public.py http://127.0.0.1:3084
 """
 import hashlib
+import csv
+import io
 import json
 from pathlib import Path
 import sys
@@ -63,6 +65,27 @@ def run(page):
     wait_for(page, '!window.factoryStudio.getState().job', 30)
 
 
+def check_wip_pages(page, expected_ids):
+    limit = page.evaluate('WIP_PAGE_SIZE')
+    first = page.locator('[data-wip-lot]').all_text_contents()
+    assert len(first) == min(limit, len(expected_ids))
+    assert len(first) == len(set(first))
+    if len(expected_ids) > limit:
+        page.locator('[data-wip-page="page:1"]').click()
+        second = page.locator('[data-wip-lot]').all_text_contents()
+        assert 0 < len(second) <= limit and len(second) == len(set(second))
+        assert not set(first) & set(second)
+        page.locator('[data-wip-page="page:-1"]').click()
+        assert page.locator('[data-wip-lot]').all_text_contents() == first
+    with page.expect_download() as download:
+        page.locator('#wip-csv').click()
+    content = Path(download.value.path()).read_text(encoding='utf-8-sig')
+    exported = [row[0] for row in list(csv.reader(io.StringIO(content)))[1:]]
+    assert len(exported) == len(set(exported)) == len(expected_ids)
+    assert set(exported) == set(expected_ids)
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+
+
 with sync_playwright() as playwright:
     browser = playwright.chromium.launch(headless=True)
     for lang in ['ko', 'en', 'ja']:
@@ -101,13 +124,43 @@ with sync_playwright() as playwright:
             page.evaluate('()=>{pause();seek(S.result.events.length);selectTab("wip")}')
             assert page.evaluate('wipProjection().allTotals.count') == custom['summary']['arrived']
             assert page.evaluate('wipProjection().allTotals.wip') == custom['summary']['arrived'] - custom['summary']['completed']
-            assert page.locator('#wip-lots tbody tr').count() == custom['summary']['arrived']
+            check_wip_pages(page, page.evaluate('wipProjection().rows.map(row=>row.id)'))
             page.locator('[data-wip-lot]').first.click()
             page.locator('[data-wip-reason]').click()
             assert page.locator('#allocation-detail').count() == 1
             page.locator('[data-tab="results"]').click()
             assert page.locator('#results-view').is_visible()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        page.set_viewport_size({'width': 1600, 'height': 1100})
+
+        # Public static delivery also exercises the 50k-event/1000-lot contract.
+        # Construct in-page with yielding; do not transport the fixture object.
+        fixture = (Path(__file__).parent / 'large_replay_fixture.js').read_text()
+        page.evaluate('()=>{' + fixture + ';window.largeReplayFixture=largeReplayFixture;}')
+        page.evaluate('''async()=>{pause();window.publicOriginalResult=S.result;
+          const result=await largeReplayFixture(S.result);await prepareInventoryReplay(result);
+          S.result=result;S.model=result.model;WIP.filters={};WIP.selectedLot=null;seek(50000);selectTab('wip');}''')
+        for width in [1600, 320]:
+            page.set_viewport_size({'width': width, 'height': 1100 if width > 320 else 844})
+            page.locator('#wip-reset').click()
+            check_wip_pages(page, [f'PERF_{i}' for i in range(1000)])
+            page.locator('[data-wip-page="page:1"]').click()
+            page.locator('[data-wip-lot]').first.click()
+            selected = page.evaluate('WIP.selectedLot')
+            assert page.locator('.wip-highlight').count() > 0
+            page.locator('[data-wip-page="page:-1"]').click()
+            assert page.evaluate('WIP.selectedLot') == selected
+            assert selected in page.locator('#wip-detail').inner_text()
+            page.locator('[data-wip-filter="status"]').select_option('waiting')
+            assert page.locator('#wip-visible').inner_text() == '1000'
+            page.locator('#wip-search').fill('PERF_999')
+            assert page.locator('[data-wip-lot]').all_text_contents() == ['PERF_999']
+            check_wip_pages(page, ['PERF_999'])
+            page.locator('#wip-reset').click()
+            assert page.locator('#wip-visible').inner_text() == '1000'
+            assert page.locator('[data-wip-lot]').count() <= page.evaluate('WIP_PAGE_SIZE')
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        page.evaluate('()=>{S.result=publicOriginalResult;S.model=S.result.model;WIP.filters={};WIP.selectedLot=null;seek(0);selectTab("events")}')
         page.set_viewport_size({'width': 1600, 'height': 1100})
 
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
