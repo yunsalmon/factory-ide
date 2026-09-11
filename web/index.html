@@ -112,10 +112,15 @@
               <span id="sync-status" class="good"><span data-i18n="ui_12">● 코드 ↔ 공정도 동기화</span></span
               ><button id="apply-code" class="quiet"><span data-i18n="ui_226">공정도 갱신 ↗</span></button>
             </div>
+            <div class="editor-keyboard-help">
+              <p id="editor-keyboard-help" data-i18n="editor_keyboard_help"></p>
+              <button type="button" id="editor-skip-results" data-i18n="editor_skip_results"></button>
+            </div>
             <div class="code-wrap">
               <pre id="line-numbers" aria-hidden="true">1</pre>
               <textarea
                 id="code"
+                aria-describedby="editor-keyboard-help"
                 aria-label="Python 코드 편집기" data-i18n-aria-label="ui_158"
                 spellcheck="false"
                 wrap="off"

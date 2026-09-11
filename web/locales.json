@@ -796,7 +796,9 @@
     "graph_buffer_event": "버퍼의 최근 변경 이벤트",
     "graph_legacy_state": "이 기록에는 운영 상태가 없어 기존 설비 상태를 표시합니다.",
     "graph_buffer_unavailable": "버퍼 {0}의 기록된 재고를 확인할 수 없습니다.",
-    "graph_assigned_lot": "예약·연결 로트: {0}"
+    "graph_assigned_lot": "예약·연결 로트: {0}",
+    "editor_keyboard_help": "Tab / Shift+Tab: 다음 / 이전 컨트롤로 이동합니다. Ctrl 또는 ⌘ + ] / [: 들여쓰기 / 내어쓰기. Ctrl 또는 ⌘ + Enter: 실행. 코드를 건너뛰려면 아래 결과 버튼을 사용하세요.",
+    "editor_skip_results": "결과로 건너뛰기"
   },
   "en": {
     "ui_1": "Arrival",
@@ -1595,7 +1597,9 @@
     "graph_buffer_event": "Latest buffer change event",
     "graph_legacy_state": "This trace has no operational states; showing its recorded legacy machine state.",
     "graph_buffer_unavailable": "Recorded inventory for buffer {0} is unavailable.",
-    "graph_assigned_lot": "Reserved / associated lot: {0}"
+    "graph_assigned_lot": "Reserved / associated lot: {0}",
+    "editor_keyboard_help": "Tab / Shift+Tab: move to the next / previous control. Ctrl or ⌘ + ] / [: indent / unindent. Ctrl or ⌘ + Enter: run. Use the results button below to skip the code.",
+    "editor_skip_results": "Skip to results"
   },
   "ja": {
     "ui_1": "投入",
@@ -2394,6 +2398,8 @@
     "graph_buffer_event": "バッファの最新変更イベント",
     "graph_legacy_state": "この記録には稼働状態がないため、記録済みの従来設備状態を表示します。",
     "graph_buffer_unavailable": "バッファ {0} の記録済み在庫は不明です。",
-    "graph_assigned_lot": "予約・関連ロット: {0}"
+    "graph_assigned_lot": "予約・関連ロット: {0}",
+    "editor_keyboard_help": "Tab / Shift+Tab: 次 / 前の操作項目へ移動。Ctrl または ⌘ + ] / [: インデント / 解除。Ctrl または ⌘ + Enter: 実行。コードを飛ばすには下の結果ボタンを使います。",
+    "editor_skip_results": "結果へスキップ"
   }
 }
