@@ -221,7 +221,7 @@ with sync_playwright() as playwright:
       selectTab('data');
       window.__lateReadRelease=null;
       window.__lateReadPromise=readDataFile({name:'late.csv',size:32,text:()=>new Promise(resolve=>__lateReadRelease=resolve)});
-      editor.setValue(S.source+'\\n# pending lifecycle validation');
+      const field=document.querySelector('#code');field.value=S.source+'\\n# pending lifecycle validation';field.dispatchEvent(new Event('input',{bubbles:true}));
       const before={dataSerial:DATA.serial,validationGeneration,created:__workerResourceAudit.created.length,
         source:S.source,tab:S.tab,pendingTimer:parseTimer!==null};
       dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));
@@ -254,7 +254,7 @@ with sync_playwright() as playwright:
     # selection explicitly starts fresh bounded work.
     page.evaluate('''()=>{
       dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}));
-      editor.setValue(editor.getValue()+'\\n# restored lifecycle validation');
+      const field=document.querySelector('#code');field.value=S.source+'\\n# restored lifecycle validation';field.dispatchEvent(new Event('input',{bubbles:true}));
     }''')
     page.wait_for_function('()=>S.valid&&browserRuntime.state==="ready"', timeout=30000)
     wait_targets(1, 30)

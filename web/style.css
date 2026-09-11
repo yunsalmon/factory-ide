@@ -398,6 +398,24 @@ h1 {
   content-visibility: hidden;
   contain-intrinsic-size: auto 300px;
 }
+.loader-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid #b7784f;
+  border-radius: 7px;
+  background: #fff7ef;
+  color: #693917;
+}
+.enhance-cost {
+  flex: 1 1 100%;
+  order: 5;
+  color: var(--muted);
+  font-size: 10px;
+}
 .panel-header {
   height: 45px;
   display: flex;
@@ -431,12 +449,14 @@ h1 {
 }
 .editor-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 3px 8px;
   padding: 7px 10px;
   border-bottom: 1px solid #edf0ea;
   font-size: 9px;
-  height: 32px;
+  min-height: 32px;
 }
 .editor-toolbar button {
   font-size: 9px;

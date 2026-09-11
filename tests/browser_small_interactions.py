@@ -29,7 +29,8 @@ install = """() => {
   }
   window.issue35Action=async(name,index)=>{
     const start=performance.now(),callStart=issue35Calls.length,half=Math.floor(S.result.events.length/2);
-    if(name==='cursor') seek(half+(index%2));
+    if(name==='cursor') seek(half+(index%3));
+    if(name==='wip_cursor') seek(half+(index%3));
     if(name==='wip') selectTab('wip');
     if(name==='filter'){WIP.filters={status:index%2?'waiting':'processing'};renderInventory()}
     if(name==='search'){WIP.filters={search:index%2?'LOT-0':'L'};renderInventory()}
@@ -68,11 +69,13 @@ with sync_playwright() as playwright:
         assert page.locator('#enhance-editor').is_visible()
         page.evaluate(install)
         actions = {}
-        for name in ['cursor', 'wip', 'filter', 'search', 'lot', 'operations', 'results']:
+        for name in ['cursor', 'wip', 'wip_cursor', 'filter', 'search', 'lot', 'operations', 'results']:
             samples = []
             for index in range(20):
                 if name == 'wip':
                     page.evaluate('selectTab("events")')
+                if name == 'wip_cursor':
+                    page.evaluate('selectTab("wip");WIP.filters={};WIP.selectedLot=null;WIP.selectedGroup=null')
                 if name == 'operations':
                     page.evaluate('selectTab("results")')
                 if name == 'results':

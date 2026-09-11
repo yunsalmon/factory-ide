@@ -66,6 +66,7 @@ let parseTimer,
   settingEditor = false,
   errorLine = null;
 let graphRenderKey = null;
+let localeChangeGeneration = 0;
 const eventPageSize = 40;
 let eventPage = 0, eventPageCursor = -1, eventPageResult = null, eventPageLot = null;
 const browserRuntime = PUBLIC_DEMO
@@ -462,7 +463,7 @@ function renderGraphOperationDetail(projection = graphProjection()) {
   if (focusId && document.getElementById(focusId)) document.getElementById(focusId).focus({preventScroll:true});
 }
 
-function renderGraph() {
+function renderGraph(inventoryView = null, graphView = null) {
   if (!S.model) return;
   const viewport = $("#graph-viewport"),
     finalView = S.tab === "wip" ? WIP.finalView : S.tab === "operations" ? S.operationScope !== "cursor" : S.tab === "orders" ? PLANNER.finalView : false,
@@ -470,22 +471,24 @@ function renderGraph() {
       S.selected?.type, S.selected?.id, WIP.selectedLot, WIP.selectedGroup, locale,
       autoFit, autoFit ? viewport.clientWidth : S.zoom];
   if (graphRenderKey && renderKey.every((value, index) => graphRenderKey[index] === value)) {
-    if ($("#graph-operation-detail:empty")) renderGraphOperationDetail(graphProjection());
+    if ($("#graph-operation-detail:empty")) renderGraphOperationDetail(graphView || graphProjection());
     return;
   }
   const { positions, groups, rows, width, height } = graphLayout();
   if (autoFit)
     S.zoom = Math.min(1.15, Math.max(0.38, (viewport.clientWidth - 12) / width));
-  const projection = graphProjection(),
+  const projection = graphView || graphProjection(),
     { lots, machines } = projection,
     active = S.result?.events[projection.cursor - 1];
-  const routeHistory = new Set(
-    S.lot
-      ? (S.result?.events.slice(0, projection.cursor) || [])
-          .filter((e) => e.lot?.id === S.lot && e.kind === "move")
-          .map((e) => e.route)
-      : [],
-  );
+  const routeHistory = new Set(), terminalCounts = {INPUT: 0, OUTPUT: 0}, waitingCounts = new Map();
+  if (S.lot) for (let index = 0; index < projection.cursor; index++) {
+    const event = S.result.events[index];
+    if (event.lot?.id === S.lot && event.kind === "move") routeHistory.add(event.route);
+  }
+  for (const lot of Object.values(lots)) {
+    if (Object.hasOwn(terminalCounts, lot.location)) terminalCounts[lot.location]++;
+    if (lot.state === "waiting") waitingCounts.set(lot.location, (waitingCounts.get(lot.location) || 0) + 1);
+  }
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * S.zoom}" height="${height * S.zoom}" viewBox="0 0 ${width} ${height}" role="group" aria-label="${tr("ui_62")}"><defs><marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#a6bca6"/></marker><marker id="arrow-active" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#32855c"/></marker></defs>`;
   for (const { p, x } of groups) {
     svg += `<rect x="${x}" y="21" width="165" height="${height - 40}" rx="11" fill="#f7faf5" fill-opacity=".85" stroke="#e7eee2"/><text x="${x + 15}" y="47" class="process-heading">${esc(p.name)}</text><text x="${x + 143}" y="47" class="process-number">${String(groups.findIndex((g) => g.p === p) + 1).padStart(2, "0")}</text>`;
@@ -514,15 +517,13 @@ function renderGraph() {
   }
   for (const terminal of ["INPUT", "OUTPUT"]) {
     const p = positions[terminal],
-      count = Object.values(lots).filter((l) => l.location === terminal).length;
+      count = terminalCounts[terminal];
     svg += `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="8" class="graph-terminal" data-terminal="${terminal}"/><text x="${p.x + p.w / 2}" y="${p.y + 17}" text-anchor="middle" class="terminal-text">${terminal}</text><text x="${p.x + p.w / 2}" y="${p.y + 31}" text-anchor="middle" class="terminal-text">${count} lots</text>`;
   }
   for (const m of S.model.machines) {
     const p = positions[m.id],
       state = machines[m.id],
-      waiting = Object.values(lots).filter(
-        (l) => l.location === m.id && l.state === "waiting",
-      ).length;
+      waiting = waitingCounts.get(m.id) || 0;
     const selected = S.selected?.id === m.id;
     const stateLabel = traceStateLabel(state.state), detail = graphMachineDescription(m, state, projection);
     svg += `<g class="machine-node ${esc(state?.state || "")} ${selected ? "selected" : ""}" data-node="${esc(m.id)}" tabindex="0" role="button" aria-label="${esc(detail)}"><title>${esc(detail)}</title><rect class="node-bg" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="7"/><rect x="${p.x + 10}" y="${p.y + 11}" width="20" height="20" rx="5" fill="${state?.state === "processing" ? "#d7ebda" : "#eff3ea"}"/><path d="M${p.x + 15} ${p.y + 25}v-8h4v4h5v4z" fill="none" stroke="#719069" stroke-width="1.2"/><text x="${p.x + 37}" y="${p.y + 21}" class="node-name">${esc(m.name.length > 10 ? m.name.slice(0, 9) + "…" : m.name)}</text><text x="${p.x + 37}" y="${p.y + 33}" class="node-meta">${esc(m.id)} · ${m.time}m</text><line x1="${p.x + 10}" y1="${p.y + 41}" x2="${p.x + p.w - 10}" y2="${p.y + 41}" stroke="#edf2e8"/><circle cx="${p.x + 13}" cy="${p.y + 51}" r="2.4" fill="${state?.state === "processing" ? "#51a277" : ["reserved", "setup", "resource_wait", "blocked"].includes(state.state) ? "#d5a45a" : ["down", "maintenance", "offshift"].includes(state.state) ? "#80677a" : "#b6c5b0"}"/><text x="${p.x + 21}" y="${p.y + 54}" class="node-status">${esc(stateLabel)}</text><text x="${p.x + 10}" y="${p.y + 68}" class="node-meta">${esc(state.lot ? (state.lot.length > 14 ? state.lot.slice(0, 13) + "…" : state.lot) : "—")}</text><text x="${p.x + p.w - 10}" y="${p.y + 68}" text-anchor="end" class="node-meta">${tr("ui_2")} ${waiting}</text></g>`;
@@ -531,7 +532,7 @@ function renderGraph() {
   $("#graph").innerHTML = svg;
   $("#zoom-label").textContent = Math.round(S.zoom * 100) + "%";
   $("#graph-scope").textContent = `${tr(projection.finalView ? "wip_final" : "wip_replay")} · ${fmt(projection.time)} min`;
-  highlightWipGraph();
+  highlightWipGraph(inventoryView);
   renderGraphOperationDetail(projection);
   $$("[data-node]").forEach((g) => {
     g.onclick = () => { pause(); inspectMachine(g.dataset.node); $("#graph-operation-detail")?.focus({preventScroll:true}); };
@@ -547,8 +548,8 @@ function renderGraph() {
   });
   graphRenderKey = renderKey;
 }
-function renderMetrics() {
-  const { lots, time } = stateAt(),
+function renderMetrics(snapshot = stateAt()) {
+  const { lots, time } = snapshot,
     all = Object.values(lots),
     done = all.filter((l) => l.state === "completed");
   $("#metric-time").innerHTML = `${fmt(time)} <small>min</small>`;
@@ -557,11 +558,11 @@ function renderMetrics() {
   $("#metric-cycle").innerHTML =
     `${done.length ? fmt(done.reduce((sum, l) => sum + l.completed - l.created, 0) / done.length) : "—"} <small>min</small>`;
 }
-function renderPlayback() {
+function renderPlayback(snapshot = stateAt()) {
   const count = S.result?.events.length || 0;
   $("#timeline").max = count;
   $("#timeline").value = S.cursor;
-  $("#timeline-time").textContent = fmt(stateAt().time) + " min";
+  $("#timeline-time").textContent = fmt(snapshot.time) + " min";
   $("#timeline-end").textContent = `${S.cursor} / ${count}`;
   $("#play-button").textContent = S.playing ? "Ⅱ" : "▶";
   for (const id of ["play-button", "step-button", "rewind-button", "export-trace"])
@@ -570,11 +571,12 @@ function renderPlayback() {
 }
 function selectTab(tab) {
   S.tab = tab;
-  renderGraph();
+  const inventoryView = tab === "wip" && S.result ? wipProjection() : null;
+  renderGraph(inventoryView);
   $$("[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-  renderTrace();
+  renderTrace(inventoryView);
 }
-function renderTrace() {
+function renderTrace(inventoryView = null) {
   const container = $("#trace-content");
   container.dataset.renderedTab = S.tab;
   if (S.tab === "console") {
@@ -591,7 +593,7 @@ function renderTrace() {
       `<div class="empty"><b>${tr("ui_68")}</b>${tr("ui_69")}<br>${tr("ui_70")}</div>`;
     return;
   }
-  if (S.tab === "wip") { renderInventory(); return; }
+  if (S.tab === "wip") { renderInventory(inventoryView); return; }
   if (S.tab === "results") { renderAllocationResults(); return; }
   if (S.tab === "allocations") { renderAllocationComparison(); return; }
   const events = S.result.events.slice(0, S.cursor);
@@ -657,11 +659,12 @@ function seek(cursor, preserveComparison = false) {
     const allocation = S.result?.allocations?.find(a => a.id === event?.allocation_id);
     S.comparison = event?.kind === "decision" || event?.kind === "blocked" ? event.index : allocation?.decision_index ?? S.result?.events.slice(0, S.cursor).findLast(e => ["decision", "blocked"].includes(e.kind))?.index;
   }
-  persistReplay();
-  renderPlayback();
-  renderMetrics();
-  renderGraph();
-  renderTrace();
+  scheduleReplayPersistence();
+  const graphView = graphProjection(), inventoryView = S.tab === "wip" ? wipProjection() : null;
+  renderPlayback(graphView);
+  renderMetrics(graphView);
+  renderGraph(inventoryView, graphView);
+  renderTrace(inventoryView);
   if (S.selected?.type === "lot") inspectLot(S.selected.id, false);
 }
 function pause() {
@@ -1285,8 +1288,14 @@ window.addEventListener("keydown", (e) => {
 new ResizeObserver(() => {
   if (S.model) renderGraph();
 }).observe($("#graph-viewport"));
-function enhanceEditor() {
+function enhanceEditor(selection = null) {
   if (editor || !window.CodeMirror) return editor;
+  const textarea = $("#code");
+  selection ||= {
+    start: textarea.selectionStart,
+    end: textarea.selectionEnd,
+    direction: textarea.selectionDirection || "none",
+  };
   editor = CodeMirror.fromTextArea($("#code"), {
     mode: { name: "python", version: 3 },
     theme: "factory",
@@ -1375,14 +1384,24 @@ function enhanceEditor() {
   });
   editor.on("cursorActivity", updateEditor);
   new ResizeObserver(() => editor.refresh()).observe($(".editor-panel"));
+  const anchor = selection.direction === "backward" ? selection.end : selection.start;
+  const head = selection.direction === "backward" ? selection.start : selection.end;
+  editor.setSelection(editor.posFromIndex(anchor), editor.posFromIndex(head), {scroll: false});
   editor.focus();
   return editor;
 }
 enhanceEditor();
 $("#enhance-editor").onclick = async () => {
-  $("#enhance-editor").disabled = true;
-  await window.loadEnhancedEditor?.();
-  $("#enhance-editor").hidden = Boolean(editor);
+  const button = $("#enhance-editor"), textarea = $("#code");
+  const selection = {start: textarea.selectionStart, end: textarea.selectionEnd, direction: textarea.selectionDirection || "none"};
+  button.disabled = true;
+  try {
+    await window.loadEnhancedEditor?.(selection);
+    button.hidden = Boolean(editor);
+  } catch (error) {
+    button.disabled = false;
+    window.showFactoryLoadFailure?.("editor", error.message);
+  }
 };
 if (editor) $("#enhance-editor").hidden = true;
 async function boot() {
@@ -1390,8 +1409,12 @@ async function boot() {
     await window.initialLocaleReady;
     translateStatic();
     if (!PUBLIC_DEMO) {
-      await window.loadEnhancedEditor?.();
-      if (editor) $("#enhance-editor").hidden = true;
+      try {
+        await window.loadEnhancedEditor?.();
+        if (editor) $("#enhance-editor").hidden = true;
+      } catch (error) {
+        window.showFactoryLoadFailure?.("editor", error.message);
+      }
     }
     if (PUBLIC_DEMO) {
       const response = await fetch("/demo.json");
@@ -1540,12 +1563,35 @@ function renderAllocationResults() {
   });
 }
 
+let replayResultCache = null, replayResultCacheValue = "", replayPersistenceHandle = null;
 function persistReplay() {
   try {
     const key = PUBLIC_DEMO ? "factory-studio.public.replay.v1" : "factory-studio.replay.v1";
-    if (S.result) localStorage.setItem(key, JSON.stringify({source: S.source, result: S.result, cursor: S.cursor, tab: S.tab, resultsFinal: S.resultsFinal, filters: S.resultFilters}));
+    if (S.result) {
+      if (replayResultCache !== S.result) {
+        replayResultCache = S.result;
+        replayResultCacheValue = JSON.stringify(S.result);
+      }
+      const payload = `{"source":${JSON.stringify(S.source)},"result":${replayResultCacheValue},"cursor":${S.cursor},"tab":${JSON.stringify(S.tab)},"resultsFinal":${Boolean(S.resultsFinal)},"filters":${JSON.stringify(S.resultFilters)}}`;
+      localStorage.setItem(key, payload);
+    }
     else localStorage.removeItem(key);
   } catch { /* Source saving remains independent when a large trace exceeds quota. */ }
+}
+function scheduleReplayPersistence() {
+  if (replayPersistenceHandle !== null) return;
+  const complete = () => { replayPersistenceHandle = null; persistReplay(); };
+  replayPersistenceHandle = window.requestIdleCallback
+    ? requestIdleCallback(complete, {timeout: 500})
+    : setTimeout(complete, 0);
+}
+function flushReplayPersistence() {
+  if (replayPersistenceHandle !== null) {
+    if (window.cancelIdleCallback) cancelIdleCallback(replayPersistenceHandle);
+    else clearTimeout(replayPersistenceHandle);
+    replayPersistenceHandle = null;
+  }
+  persistReplay();
 }
 function invalidatePendingValidation() {
   clearTimeout(parseTimer);
@@ -1553,7 +1599,7 @@ function invalidatePendingValidation() {
   validationGeneration++;
 }
 window.addEventListener("pagehide", () => {
-  persistReplay();
+  flushReplayPersistence();
   // Invalidate deferred producers before terminating current consumers. A
   // persisted BFCache page keeps its UI/source, but performs no hidden work;
   // a later user action uses the new validation generation normally.
@@ -1564,6 +1610,7 @@ window.addEventListener("pagehide", () => {
   browserRuntime?.stop();
 });
 $("#language").onchange = async () => {
+  const generation = ++localeChangeGeneration;
   const oldLocale = locale;
   const translateOld = text => {
     const key = Object.keys(translations[oldLocale]).find(k => translations[oldLocale][k] === text);
@@ -1574,7 +1621,16 @@ $("#language").onchange = async () => {
   const cmCursor = editor?.getCursor();
   const inspectorOpen = !$("#inspector").hidden;
   const nextLocale = $("#language").value;
-  await window.loadLocale?.(nextLocale);
+  try {
+    await window.loadLocale?.(nextLocale);
+  } catch (error) {
+    if (generation === localeChangeGeneration) {
+      $("#language").value = locale;
+      window.showFactoryLoadFailure?.("locale", error.message);
+    }
+    return;
+  }
+  if (generation !== localeChangeGeneration) return;
   locale = nextLocale;
   try { localStorage.setItem(localeKey, locale); } catch {}
   if (S.resultFilters.status) S.resultFilters.status = translateOld(S.resultFilters.status);

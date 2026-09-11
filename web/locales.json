@@ -804,6 +804,7 @@
     "graph_assigned_lot": "예약·연결 로트: {0}",
     "editor_keyboard_help": "Tab / Shift+Tab: 다음 / 이전 컨트롤로 이동합니다. Ctrl 또는 ⌘ + ] / [: 들여쓰기 / 내어쓰기. Ctrl 또는 ⌘ + Enter: 실행. 코드를 건너뛰려면 아래 결과 버튼을 사용하세요.",
     "editor_enhance": "고급 편집기 사용",
+    "editor_enhance_cost": "선택 시 편집기 모듈을 한 번 불러옵니다.",
     "editor_skip_results": "결과로 건너뛰기"
   },
   "en": {
@@ -1611,6 +1612,7 @@
     "graph_assigned_lot": "Reserved / associated lot: {0}",
     "editor_keyboard_help": "Tab / Shift+Tab: move to the next / previous control. Ctrl or ⌘ + ] / [: indent / unindent. Ctrl or ⌘ + Enter: run. Use the results button below to skip the code.",
     "editor_enhance": "Enable advanced editor",
+    "editor_enhance_cost": "Loads the editor modules once when selected.",
     "editor_skip_results": "Skip to results"
   },
   "ja": {
@@ -2418,6 +2420,7 @@
     "graph_assigned_lot": "予約・関連ロット: {0}",
     "editor_keyboard_help": "Tab / Shift+Tab: 次 / 前の操作項目へ移動。Ctrl または ⌘ + ] / [: インデント / 解除。Ctrl または ⌘ + Enter: 実行。コードを飛ばすには下の結果ボタンを使います。",
     "editor_enhance": "高機能エディターを使用",
+    "editor_enhance_cost": "選択するとエディターモジュールを一度読み込みます。",
     "editor_skip_results": "結果へスキップ"
   }
 }
