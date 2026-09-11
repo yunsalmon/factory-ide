@@ -5,6 +5,30 @@ const internalFetch = self.fetch.bind(self);
 const internalImportScripts = self.importScripts.bind(self);
 const PYODIDE_VERSION = "0.27.7";
 const PYODIDE_BASE = `/vendor/pyodide/${PYODIDE_VERSION}/`;
+// Delivery alias is still WASM, never JavaScript. Only this pinned URL is mapped.
+// Fetch SRI checks decoded bytes before Pyodide can instantiate the response.
+const WASM_ALIAS = PYODIDE_BASE + "pyodide.asm.wasm.js";
+const WASM_INTEGRITY = "sha256-pQ3RhD+AWgt8RbYQN+4Neybf6F7+DhjvlaNK0k5AH18=";
+let rejectRuntimeAsset;
+function runtimeFetch(input, options) {
+  const url = new URL(input instanceof Request ? input.url : input, self.location.href);
+  const method = options?.method || (input instanceof Request ? input.method : "GET");
+  if (url.href === new URL(PYODIDE_BASE + "pyodide.asm.wasm", self.location.origin).href && method === "GET") {
+    const request = input instanceof Request ? new Request(new URL(WASM_ALIAS, self.location.origin), input) : new URL(WASM_ALIAS, self.location.origin);
+    return internalFetch(request, {...options, integrity: WASM_INTEGRITY}).then(response => {
+      if (!response.ok || response.headers.get("Content-Type")?.split(";")[0].trim() !== "application/wasm") {
+        throw new TypeError("Pinned WASM delivery response is unavailable or has an invalid MIME type");
+      }
+      return response;
+    }).catch(error => {
+      // Pyodide 0.27.7 logs instantiateStreaming failures without rejecting its
+      // bootstrap promise. Propagate delivery/integrity errors to our controller.
+      rejectRuntimeAsset?.(error);
+      throw error;
+    });
+  }
+  return internalFetch(input, options);
+}
 let pyodide;
 let runtime;
 
@@ -14,8 +38,16 @@ function send(message) {
 
 async function initialize() {
   if (runtime) return runtime;
+  self.fetch = runtimeFetch;
   internalImportScripts(PYODIDE_BASE + "pyodide.js");
-  pyodide = await loadPyodide({indexURL: new URL(PYODIDE_BASE, self.location.origin).href});
+  const assetFailure = new Promise((_, reject) => { rejectRuntimeAsset = reject; });
+  try {
+    pyodide = await Promise.race([
+      loadPyodide({indexURL: new URL(PYODIDE_BASE, self.location.origin).href}), assetFailure,
+    ]);
+  } finally {
+    rejectRuntimeAsset = null;
+  }
   const [wheel, engine, model, messages, locales, orders, disruptions, metrics] = await Promise.all([
     internalFetch(PYODIDE_BASE + "simpy-4.1.1-py3-none-any.whl").then((response) => response.arrayBuffer()),
     internalFetch("/runtime/engine.py").then((response) => response.text()),
@@ -168,7 +200,7 @@ async function handle(message) {
     }
     send({type: "result", id: message.id, payload: response.payload});
   } catch (error) {
-    send({type: "error", id: message.id, error: error?.message || String(error), traceback: error?.stack || ""});
+    send({type: "error", id: message.id, ...(!runtime ? {code: "browser_init_error"} : {}), error: error?.message || String(error), traceback: error?.stack || ""});
   }
 }
 

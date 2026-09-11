@@ -32,3 +32,21 @@ jobs:
         with:
           name: browser-screenshots
           path: artifacts/
+  static-delivery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: docker build -f deploy/Dockerfile --build-arg SOURCE_REVISION="$GITHUB_SHA" -t factory-delivery:test .
+      - run: |
+          docker run -d --name delivery -p 127.0.0.1:13333:8080 factory-delivery:test
+          timeout 30 sh -c 'until curl -fsS http://127.0.0.1:13333/healthz; do sleep 1; done'
+      - run: python tests/static_delivery.py http://127.0.0.1:13333
+      - run: python tests/browser_runtime_delivery.py http://127.0.0.1:13333
+      - run: python tests/browser_initialization.py http://127.0.0.1:13333
