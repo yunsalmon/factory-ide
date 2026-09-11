@@ -119,6 +119,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, target.read_bytes(), 'application/wasm' if name.endswith('.wasm') else 'text/javascript' if name.endswith('.js') else 'application/octet-stream')
         assets['/locales.json'] = ('locales.json', 'application/json')
         assets['/operations.js'] = ('operations.js', 'text/javascript')
+        assets['/graph-state.js'] = ('graph-state.js', 'text/javascript')
         assets.update({f'/{name}': (name, 'text/javascript') for name in ('order-projection.js', 'order-ui.js', 'data-core.js', 'data-ui.js', 'data-worker.js')})
         if path.startswith('/vendor/codemirror/'):
             name = path.removeprefix('/vendor/codemirror/')

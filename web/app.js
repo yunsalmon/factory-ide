@@ -61,6 +61,10 @@ const kinds = {
   get finish() { return tr("ui_8"); },
   get complete() { return tr("ui_9"); },
   get blocked() { return tr("ui_10"); },
+  get machine_state() { return tr("order_machine_state"); },
+  get buffer_enter() { return tr("order_buffer_enter"); },
+  get buffer_wait() { return tr("order_buffer_wait"); },
+  get transport_arrive() { return tr("order_transport_arrive"); },
 };
 // One formatter covers every lot and machine state currently emitted by the
 // trace contract. A future state remains visible and accessible without
@@ -362,8 +366,8 @@ function graphLayout() {
         (p) => S.model.machines.filter((m) => m.process === p.id && m.line === line).length,
       ),
     );
-    rows.set(line, { y, height: max * 81 + 20 });
-    y += max * 81 + 35;
+    rows.set(line, { y, height: max * 96 + 20 });
+    y += max * 96 + 35;
   }
   S.model.processes.forEach((p, i) => {
     const x = 103 + i * 195;
@@ -372,7 +376,7 @@ function graphLayout() {
       const ms = S.model.machines.filter((m) => m.process === p.id && m.line === line);
       ms.forEach(
         (m, j) =>
-          (positions[m.id] = { x: x + 16, y: rows.get(line).y + 19 + j * 81, w: 133, h: 61 }),
+          (positions[m.id] = { x: x + 16, y: rows.get(line).y + 19 + j * 96, w: 133, h: 76 }),
       );
     }
   });
@@ -382,21 +386,73 @@ function graphLayout() {
   positions.OUTPUT = { x: width - 63, y: height / 2 - 21, w: 52, h: 42 };
   return { positions, groups, rows, width, height };
 }
+function graphProjection() {
+  const finalView = S.tab === "wip" ? WIP.finalView : S.tab === "operations" ? S.operationScope !== "cursor" : S.tab === "orders" ? PLANNER.finalView : false;
+  return graphStateProjection(S.result, S.cursor, finalView, S.model);
+}
+function graphCause(op) {
+  if (op.bufferId !== null && op.bufferId !== undefined) return tr("graph_buffer_full", [op.bufferId]);
+  return op.cause ? operationCause(op.cause) : tr("allocation_reason_unavailable");
+}
+function graphLotDescription(id, op, projection) {
+  if (!op.lot) return tr("graph_no_lot");
+  const place = projection.lots[op.lot]?.placement;
+  return tr(place?.kind === "machine" && place.id === id ? "graph_held_lot" : "graph_assigned_lot", [op.lot]);
+}
+function graphMachineDescription(machine, op, projection) {
+  return [machine.name, traceStateLabel(op.state), tr(projection.finalView ? "wip_final" : "wip_replay"),
+    `${fmt(projection.time)} min`, graphLotDescription(machine.id, op, projection), graphCause(op),
+    op.buffer ? tr("graph_buffer_occupancy", [op.buffer.id, op.buffer.contents.length, op.buffer.capacity ?? "∞"]) : "", tr("ui_65")].filter(Boolean).join(" · ");
+}
+function graphShowInventory(projection, lotId, bufferId) {
+  pause(); WIP.finalView = projection.finalView; WIP.filters = lotId ? {search:lotId} : {location:bufferId};
+  WIP.selectedLot = lotId; WIP.selectedGroup = null; WIP.groupBy = "location";
+  S.selected = null; $("#inspector").hidden = true;
+  seek(projection.cursor, true); selectTab("wip");
+  const target = $(lotId ? "#wip-detail" : "#wip-groups");
+  if (target) { target.tabIndex = -1; target.focus(); target.scrollIntoView({block:"nearest"}); }
+}
+function graphShowEvent(index) {
+  pause(); WIP.finalView = false; PLANNER.finalView = false; S.operationScope = "cursor";
+  selectTab("events"); inspectEvent(index);
+  $("#inspector-content").tabIndex = -1; $("#inspector-content").focus();
+}
+function renderGraphOperationDetail(projection = graphProjection()) {
+  const host = $("#graph-operation-detail");
+  if (!host || S.selected?.type !== "machine") return;
+  const op = projection.machines[S.selected.id];
+  if (!op) { host.textContent = tr("allocation_state_unknown"); return; }
+  const focusId = host.contains(document.activeElement) ? document.activeElement.id : null;
+  host.tabIndex = -1; host.setAttribute("aria-label", tr("graph_operation_detail"));
+  const eventButton = (id, index, label) => index === null ? "" : `<button type="button" id="${id}" data-graph-event="${index}">${tr(label)}</button>`;
+  host.innerHTML = `<h4>${tr("graph_operation_detail")}</h4><p id="graph-detail-scope">${tr(projection.finalView ? "wip_final" : "wip_replay")} · ${fmt(projection.time)} min · ${tr("wip_cursor")} ${projection.cursor}</p>
+    <p>${traceStateBadge(op.state)} · ${tr("ops_cause")}: ${esc(graphCause(op))}</p>
+    ${op.inferred ? `<p>${tr("graph_legacy_state")}</p>` : ""}
+    <p>${esc(graphLotDescription(S.selected.id, op, projection))}</p>
+    <div class="graph-evidence-actions">${op.lot ? `<button type="button" id="graph-held-lot">${tr("graph_open_lot")}</button>` : ""}${eventButton("graph-state-event", op.event, "graph_state_event")}${eventButton("graph-lot-event", op.lotEvent, "graph_lot_event")}</div>
+    ${op.buffer ? `<p id="graph-buffer-occupancy">${esc(tr("graph_buffer_occupancy", [op.buffer.id, op.buffer.contents.length, op.buffer.capacity ?? "∞"]))}</p><p>${tr("graph_buffer_lots")}: ${esc(op.buffer.contents.join(", ") || "—")}</p><div class="graph-evidence-actions"><button type="button" id="graph-open-buffer">${tr("graph_open_buffer")}</button>${eventButton("graph-buffer-event", op.bufferEvent, "graph_buffer_event")}</div>` : op.bufferId ? `<p>${tr("graph_buffer_unavailable", [esc(op.bufferId)])}</p>` : ""}`;
+  if (op.lot) $("#graph-held-lot").onclick = () => graphShowInventory(projection, op.lot, null);
+  if (op.buffer) $("#graph-open-buffer").onclick = () => graphShowInventory(projection, null, op.buffer.id);
+  host.querySelectorAll("[data-graph-event]").forEach(button => button.onclick = () => graphShowEvent(Number(button.dataset.graphEvent)));
+  if (focusId && document.getElementById(focusId)) document.getElementById(focusId).focus({preventScroll:true});
+}
+
 function renderGraph() {
   if (!S.model) return;
   const { positions, groups, rows, width, height } = graphLayout();
   if (autoFit)
     S.zoom = Math.min(1.15, Math.max(0.38, ($("#graph-viewport").clientWidth - 12) / width));
-  const { lots, machines } = stateAt(S.tab === "wip" && WIP.finalView ? S.result?.events.length : S.cursor),
-    active = S.result?.events[S.cursor - 1];
+  const projection = graphProjection(),
+    { lots, machines } = projection,
+    active = S.result?.events[projection.cursor - 1];
   const routeHistory = new Set(
     S.lot
-      ? (S.result?.events.slice(0, S.cursor) || [])
+      ? (S.result?.events.slice(0, projection.cursor) || [])
           .filter((e) => e.lot?.id === S.lot && e.kind === "move")
           .map((e) => e.route)
       : [],
   );
-  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * S.zoom}" height="${height * S.zoom}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${tr("ui_62")}"><defs><marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#a6bca6"/></marker><marker id="arrow-active" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#32855c"/></marker></defs>`;
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * S.zoom}" height="${height * S.zoom}" viewBox="0 0 ${width} ${height}" role="group" aria-label="${tr("ui_62")}"><defs><marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#a6bca6"/></marker><marker id="arrow-active" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#32855c"/></marker></defs>`;
   for (const { p, x } of groups) {
     svg += `<rect x="${x}" y="21" width="165" height="${height - 40}" rx="11" fill="#f7faf5" fill-opacity=".85" stroke="#e7eee2"/><text x="${x + 15}" y="47" class="process-heading">${esc(p.name)}</text><text x="${x + 143}" y="47" class="process-number">${String(groups.findIndex((g) => g.p === p) + 1).padStart(2, "0")}</text>`;
     for (const [line, row] of rows)
@@ -429,21 +485,24 @@ function renderGraph() {
   }
   for (const m of S.model.machines) {
     const p = positions[m.id],
-      state = machines[m.id]?.state === "idle" ? null : machines[m.id],
+      state = machines[m.id],
       waiting = Object.values(lots).filter(
         (l) => l.location === m.id && l.state === "waiting",
       ).length;
     const selected = S.selected?.id === m.id;
-    svg += `<g class="machine-node ${state?.state || ""} ${selected ? "selected" : ""}" data-node="${esc(m.id)}" tabindex="0" role="button" aria-label="${esc(m.name)} ${tr("ui_65")}"><rect class="node-bg" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="7"/><rect x="${p.x + 10}" y="${p.y + 11}" width="20" height="20" rx="5" fill="${state?.state === "processing" ? "#d7ebda" : "#eff3ea"}"/><path d="M${p.x + 15} ${p.y + 25}v-8h4v4h5v4z" fill="none" stroke="#719069" stroke-width="1.2"/><text x="${p.x + 37}" y="${p.y + 21}" class="node-name">${esc(m.name.length > 10 ? m.name.slice(0, 9) + "…" : m.name)}</text><text x="${p.x + 37}" y="${p.y + 33}" class="node-meta">${esc(m.id)} · ${m.time}m</text><line x1="${p.x + 10}" y1="${p.y + 41}" x2="${p.x + p.w - 10}" y2="${p.y + 41}" stroke="#edf2e8"/><circle cx="${p.x + 13}" cy="${p.y + 51}" r="2.4" fill="${state?.state === "processing" ? "#51a277" : state ? "#d5a45a" : "#b6c5b0"}"/><text x="${p.x + 21}" y="${p.y + 54}" class="node-status">${state ? `${esc(state.lot)} ${state.state === "processing" ? tr("ui_66") : tr("ui_32")}` : "IDLE"}</text><text x="${p.x + p.w - 10}" y="${p.y + 54}" text-anchor="end" class="node-meta">${tr("ui_2")} ${waiting}</text></g>`;
+    const stateLabel = traceStateLabel(state.state), detail = graphMachineDescription(m, state, projection);
+    svg += `<g class="machine-node ${esc(state?.state || "")} ${selected ? "selected" : ""}" data-node="${esc(m.id)}" tabindex="0" role="button" aria-label="${esc(detail)}"><title>${esc(detail)}</title><rect class="node-bg" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="7"/><rect x="${p.x + 10}" y="${p.y + 11}" width="20" height="20" rx="5" fill="${state?.state === "processing" ? "#d7ebda" : "#eff3ea"}"/><path d="M${p.x + 15} ${p.y + 25}v-8h4v4h5v4z" fill="none" stroke="#719069" stroke-width="1.2"/><text x="${p.x + 37}" y="${p.y + 21}" class="node-name">${esc(m.name.length > 10 ? m.name.slice(0, 9) + "…" : m.name)}</text><text x="${p.x + 37}" y="${p.y + 33}" class="node-meta">${esc(m.id)} · ${m.time}m</text><line x1="${p.x + 10}" y1="${p.y + 41}" x2="${p.x + p.w - 10}" y2="${p.y + 41}" stroke="#edf2e8"/><circle cx="${p.x + 13}" cy="${p.y + 51}" r="2.4" fill="${state?.state === "processing" ? "#51a277" : ["reserved", "setup", "resource_wait", "blocked"].includes(state.state) ? "#d5a45a" : ["down", "maintenance", "offshift"].includes(state.state) ? "#80677a" : "#b6c5b0"}"/><text x="${p.x + 21}" y="${p.y + 54}" class="node-status">${esc(stateLabel)}</text><text x="${p.x + 10}" y="${p.y + 68}" class="node-meta">${esc(state.lot ? (state.lot.length > 14 ? state.lot.slice(0, 13) + "…" : state.lot) : "—")}</text><text x="${p.x + p.w - 10}" y="${p.y + 68}" text-anchor="end" class="node-meta">${tr("ui_2")} ${waiting}</text></g>`;
   }
   svg += "</svg>";
   $("#graph").innerHTML = svg;
   $("#zoom-label").textContent = Math.round(S.zoom * 100) + "%";
+  $("#graph-scope").textContent = `${tr(projection.finalView ? "wip_final" : "wip_replay")} · ${fmt(projection.time)} min`;
   highlightWipGraph();
+  renderGraphOperationDetail(projection);
   $$("[data-node]").forEach((g) => {
-    g.onclick = () => inspectMachine(g.dataset.node);
+    g.onclick = () => { pause(); inspectMachine(g.dataset.node); $("#graph-operation-detail")?.focus({preventScroll:true}); };
     g.onkeydown = (e) => {
-      if (e.key === "Enter") g.onclick();
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); g.onclick(); }
     };
   });
   $$("[data-route]").forEach((g) => {
@@ -662,7 +721,7 @@ function inspectMachine(id, newMachine = false) {
   S.selected = { type: "machine", id };
   openInspector(
     newMachine ? tr("ui_85") : tr("ui_86"),
-    `<h3>${esc(m.name)}</h3><p>${tr("ui_87")}</p><form id="property-form">${field("ID", "id", m.id, "text", newMachine ? 'required pattern="[A-Za-z][A-Za-z0-9_-]*"' : "readonly")}${field(tr("ui_88"), "name", m.name, "text", "required")}${selectField(
+    `<h3>${esc(m.name)}</h3>${newMachine ? "" : '<section id="graph-operation-detail"></section>'}<p>${tr("ui_87")}</p><form id="property-form">${field("ID", "id", m.id, "text", newMachine ? 'required pattern="[A-Za-z][A-Za-z0-9_-]*"' : "readonly")}${field(tr("ui_88"), "name", m.name, "text", "required")}${selectField(
       tr("ui_89"),
       "process",
       m.process,
@@ -830,8 +889,8 @@ function inspectEvent(index) {
   seek(index + 1);
   if (!e.lot) {
     const transition=e.transition;
-    const label=state=>translations[locale]?.["order_"+state] ? tr("order_"+state) : state;
-    openInspector(tr("order_machine_state"), `<h3>${esc(e.machine)}</h3><p>${fmt(e.time)} min</p><p>${esc(label(transition?.previous.state))} → ${esc(label(transition?.current.state))}</p><p>${esc(transition?.current.cause||"")}</p>`);
+    const label=state=>Object.hasOwn(translations[locale], "order_"+state) ? tr("order_"+state) : traceStateLabel(state);
+    openInspector(tr("order_machine_state"), `<h3>${esc(e.machine)}</h3><p>${fmt(e.time)} min</p><p>${esc(label(transition?.previous.state))} → ${esc(label(transition?.current.state))}</p><p>${esc(operationCause(transition?.current.cause||""))}</p>`);
     renderGraph();
     return;
   }
@@ -844,6 +903,8 @@ function inspectEvent(index) {
       html += `<div class="info-card rejected"><b>${tr("ui_135")} ${esc(c.lot_id)} / ${esc(c.route_id)}</b>${esc(localized(c.reason, c.reason_message))}</div>`;
     html +=
       `<p>${tr("ui_136")}</p>`;
+  } else if (e.kind === "machine_state") {
+    html += `<div class="info-card"><b>${esc(e.machine)}</b><p>${traceStateBadge(e.transition?.previous.state)} → ${traceStateBadge(e.transition?.current.state)}</p><p>${esc(operationCause(e.transition?.current.cause || ""))}</p></div>`;
   } else {
     html += `<div class="info-card"><b>${esc(e.lot.location)}${e.lot.target ? " → " + esc(e.lot.target) : ""}</b>${esc(localized(e.reason, e.reason_message) || e.route || tr("ui_137"))}${e.duration ? `<br>${tr("ui_138")} ${fmt(e.duration)} min` : ""}</div>`;
     for (const c of e.checks || [])

@@ -782,7 +782,21 @@
     "allocation_placement_release": "투입 대기",
     "allocation_placement_unknown": "알 수 없는 배치",
     "allocation_placement_unavailable": "배치 확인 불가",
-    "allocation_reason_unavailable": "원인 확인 불가"
+    "allocation_reason_unavailable": "원인 확인 불가",
+    "graph_operation_detail": "설비 운영 상태",
+    "graph_held_lot": "보유 로트: {0}",
+    "graph_no_lot": "보유 로트 없음",
+    "graph_buffer_full": "출력 버퍼 만재: {0}",
+    "graph_buffer_occupancy": "버퍼 {0} · 점유 {1} / 용량 {2}",
+    "graph_buffer_lots": "버퍼 재고 로트",
+    "graph_open_lot": "로트 위치·이력 보기",
+    "graph_open_buffer": "원인 버퍼 재고 보기",
+    "graph_state_event": "현재 상태의 전이 이벤트",
+    "graph_lot_event": "보유 로트의 최근 이벤트",
+    "graph_buffer_event": "버퍼의 최근 변경 이벤트",
+    "graph_legacy_state": "이 기록에는 운영 상태가 없어 기존 설비 상태를 표시합니다.",
+    "graph_buffer_unavailable": "버퍼 {0}의 기록된 재고를 확인할 수 없습니다.",
+    "graph_assigned_lot": "예약·연결 로트: {0}"
   },
   "en": {
     "ui_1": "Arrival",
@@ -1567,7 +1581,21 @@
     "allocation_placement_release": "Pending release",
     "allocation_placement_unknown": "Unknown placement",
     "allocation_placement_unavailable": "Placement unavailable",
-    "allocation_reason_unavailable": "Reason unavailable"
+    "allocation_reason_unavailable": "Reason unavailable",
+    "graph_operation_detail": "Machine operation",
+    "graph_held_lot": "Held lot: {0}",
+    "graph_no_lot": "No held lot",
+    "graph_buffer_full": "Output buffer full: {0}",
+    "graph_buffer_occupancy": "Buffer {0} · occupancy {1} / capacity {2}",
+    "graph_buffer_lots": "Lots in buffer",
+    "graph_open_lot": "View lot location and history",
+    "graph_open_buffer": "View cause buffer inventory",
+    "graph_state_event": "Event entering the current state",
+    "graph_lot_event": "Latest held lot event",
+    "graph_buffer_event": "Latest buffer change event",
+    "graph_legacy_state": "This trace has no operational states; showing its recorded legacy machine state.",
+    "graph_buffer_unavailable": "Recorded inventory for buffer {0} is unavailable.",
+    "graph_assigned_lot": "Reserved / associated lot: {0}"
   },
   "ja": {
     "ui_1": "投入",
@@ -2352,6 +2380,20 @@
     "allocation_placement_release": "投入待ち",
     "allocation_placement_unknown": "不明な配置",
     "allocation_placement_unavailable": "配置を確認できません",
-    "allocation_reason_unavailable": "理由を確認できません"
+    "allocation_reason_unavailable": "理由を確認できません",
+    "graph_operation_detail": "設備稼働状態",
+    "graph_held_lot": "保持ロット: {0}",
+    "graph_no_lot": "保持ロットなし",
+    "graph_buffer_full": "出力バッファ満杯: {0}",
+    "graph_buffer_occupancy": "バッファ {0} · 占有 {1} / 容量 {2}",
+    "graph_buffer_lots": "バッファ内ロット",
+    "graph_open_lot": "ロットの位置・履歴を見る",
+    "graph_open_buffer": "原因バッファの在庫を見る",
+    "graph_state_event": "現在の状態への遷移イベント",
+    "graph_lot_event": "保持ロットの最新イベント",
+    "graph_buffer_event": "バッファの最新変更イベント",
+    "graph_legacy_state": "この記録には稼働状態がないため、記録済みの従来設備状態を表示します。",
+    "graph_buffer_unavailable": "バッファ {0} の記録済み在庫は不明です。",
+    "graph_assigned_lot": "予約・関連ロット: {0}"
   }
 }
