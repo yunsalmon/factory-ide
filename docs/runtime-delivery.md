@@ -112,3 +112,14 @@ an old cached alias cannot affect an old Worker that does not request it.
 
 Public edge/latency acceptance requires deployment and has not been asserted
 from a local proxy or simulated HIT header.
+
+## Source checkout parity
+
+The development server resolves the exact versioned WASM alias directly to
+`.cache/browser-runtime/pyodide.asm.wasm` with `application/wasm`. It does not
+need `build_public`, a dist directory, or a generated alias in the download
+cache. A stale alias file is ignored; a missing canonical file returns404.
+The source server keeps its existing no-store policy and runtime allowlist.
+`test_wasm_alias_uses_canonical_cache_without_generated_files` uses an isolated
+temporary root containing only the canonical fixture and never skips; the
+real browser experiment CI test then exercises SRI with downloaded pins.

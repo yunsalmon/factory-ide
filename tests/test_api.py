@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+import tempfile
+from unittest.mock import patch
 import threading
 import time
 import unittest
@@ -38,6 +40,37 @@ class ApiTests(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError) as error:
                 urllib.request.urlopen(self.base + path)
             self.assertEqual(error.exception.code, 404)
+
+    def test_wasm_alias_uses_canonical_cache_without_generated_files(self):
+        # No build_public output or downloaded alias exists in this isolated root.
+        # This test never skips when the optional real runtime cache is absent.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache = root / '.cache/browser-runtime'
+            cache.mkdir(parents=True)
+            canonical = cache / 'pyodide.asm.wasm'
+            canonical.write_bytes(b'\x00asm\x01\x00\x00\x00')
+            alias = cache / 'pyodide.asm.wasm.js'
+            self.assertFalse(alias.exists())
+            prefix = f'/vendor/pyodide/{server.PYODIDE_VERSION}/'
+            with patch.object(server, 'ROOT', root):
+                for filename in ['pyodide.asm.wasm', 'pyodide.asm.wasm.js']:
+                    with urllib.request.urlopen(self.base + prefix + filename) as response:
+                        self.assertEqual(response.read(), canonical.read_bytes())
+                        self.assertEqual(response.headers['Content-Type'], 'application/wasm')
+                        self.assertEqual(response.headers['X-Content-Type-Options'], 'nosniff')
+                        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+                        self.assertNotIn('unsafe-eval', response.headers['Content-Security-Policy'])
+                # A stale generated alias must never override the pinned canonical file.
+                alias.write_bytes(b'stale generated alias')
+                with urllib.request.urlopen(self.base + prefix + alias.name) as response:
+                    self.assertEqual(response.read(), canonical.read_bytes())
+                canonical.unlink()
+                for path in [prefix + alias.name, prefix + 'nested/' + alias.name,
+                             '/vendor/pyodide/0.0.0/' + alias.name]:
+                    with self.assertRaises(urllib.error.HTTPError) as error:
+                        urllib.request.urlopen(self.base + path)
+                    self.assertEqual(error.exception.code, 404)
 
     def test_worker_only_wasm_policy_and_runtime_allowlist(self):
         for path in ['/', '/app.js']:
