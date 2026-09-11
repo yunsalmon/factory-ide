@@ -21,7 +21,7 @@ class InitializationTests(unittest.TestCase):
           window.clearTimeout=id=>timers.delete(id);
           window.advance=ms=>{now+=ms;for(const [id,t] of [...timers])if(t.at<=now){timers.delete(id);t.fn()}};
           window.Worker=class {
-            constructor(){this.handlers={};this.messages=[];this.dead=false;}
+            constructor(...args){this.args=args;this.handlers={};this.messages=[];this.dead=false;}
             addEventListener(kind,fn){this.handlers[kind]=fn;}
             postMessage(message){this.messages.push(message);}
             terminate(){this.dead=true;}
@@ -101,3 +101,41 @@ class InitializationTests(unittest.TestCase):
           advance(7999);await flush();if(w.dead)throw Error('sync timeout early');
           advance(1);if(await p!=='browser_timeout'||!w.dead)throw Error('sync budget changed');
         }''')
+
+    def test_versioned_resource_contract_enforces_roles_and_releases(self):
+        result = self.page.evaluate('''async()=>{
+          const interactive=new BrowserPythonRuntime();
+          const ready=interactive.ensureReady(),iw=interactive.worker;
+          iw.reply({id:iw.messages[0].id,type:'ready',runtime:{python:'3.12.7'}});await ready;
+          const blocked=new BrowserPythonRuntime();let interactiveError;
+          try{await blocked.ensureReady()}catch(error){interactiveError=error.code}
+          const a=new BrowserPythonRuntime({role:'experiment'}),b=new BrowserPythonRuntime({role:'experiment'});
+          const ar=a.ensureReady(),br=b.ensureReady(),aw=a.worker,bw=b.worker;
+          aw.reply({id:aw.messages[0].id,type:'ready',runtime:{}});bw.reply({id:bw.messages[0].id,type:'ready',runtime:{}});await Promise.all([ar,br]);
+          const excess=new BrowserPythonRuntime({role:'experiment'});let experimentError;
+          try{await excess.ensureReady()}catch(error){experimentError=error.code}
+          const peak=factoryWorkerResources.snapshot();a.stop();b.stop();const settled=factoryWorkerResources.snapshot();
+          interactive.stop();const stopped=factoryWorkerResources.snapshot();
+          return {contract:FACTORY_WORKER_RESOURCE_CONTRACT,interactiveError,experimentError,peak,settled,stopped,names:[iw.args[1].name,aw.args[1].name,bw.args[1].name]};
+        }''')
+        self.assertEqual(result['contract']['version'], 1)
+        self.assertEqual(result['interactiveError'], 'browser_resource_limit')
+        self.assertEqual(result['experimentError'], 'browser_resource_limit')
+        self.assertEqual(result['peak'], {'contractVersion': 1, 'interactive': 1, 'experiment': 2, 'data': 0, 'total': 3})
+        self.assertEqual(result['settled'], {'contractVersion': 1, 'interactive': 1, 'experiment': 0, 'data': 0, 'total': 1})
+        self.assertEqual(result['stopped']['total'], 0)
+        self.assertTrue(result['names'][0].startswith('factory-interactive-runtime-'))
+        self.assertTrue(all(name.startswith('factory-experiment-runtime-') for name in result['names'][1:]))
+
+    def test_idle_reclamation_acknowledgement_is_counted(self):
+        result = self.page.evaluate('''async()=>{
+          const runtime=new BrowserPythonRuntime(),ready=runtime.ensureReady(),worker=runtime.worker;
+          worker.reply({id:worker.messages[0].id,type:'ready',runtime:{python:'3.12.7'}});await ready;
+          const parsed=runtime.parse('MODEL={}');await flush();const request=worker.messages.at(-1);
+          worker.reply({id:request.id,type:'result',payload:{model:{}},resources:{idle_reclaimed:true,globals_cleared:4,python_objects_collected:7}});
+          await parsed;const snapshot=runtime.resourceSnapshot();runtime.stop();return snapshot;
+        }''')
+        self.assertEqual(result['role'], 'interactive')
+        self.assertEqual(result['idleReclaims'], 1)
+        self.assertEqual(result['lastIdleReclaim']['globals_cleared'], 4)
+        self.assertEqual(result['total'], 1)

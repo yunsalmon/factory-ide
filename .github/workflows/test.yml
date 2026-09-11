@@ -52,3 +52,4 @@ jobs:
       - run: python tests/static_delivery.py http://127.0.0.1:13333
       - run: python tests/browser_runtime_delivery.py http://127.0.0.1:13333
       - run: python tests/browser_initialization.py http://127.0.0.1:13333
+      - run: python tests/browser_worker_resources.py http://127.0.0.1:13333 artifacts/worker-resources.json

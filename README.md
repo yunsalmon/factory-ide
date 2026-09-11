@@ -185,3 +185,6 @@ Planner scenario comparison: run and save named snapshots, compare signed final-
 Repeated browser experiments support explicit seed sets, bounded concurrency, cancellation, KPI uncertainty and portable artifacts. See [experiment contracts and local runtime setup](docs/experiments.md).
 
 Cold browser-runtime delivery and the five-context local/public release gate are documented in [docs/runtime-delivery.md](docs/runtime-delivery.md).
+The public page's retained interactive runtime, zero-settled task rules, and
+repeatable Worker/heap/RSS gate are documented in
+[docs/worker-resources.md](docs/worker-resources.md).

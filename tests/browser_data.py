@@ -40,14 +40,14 @@ with sync_playwright() as p:
    assert page.evaluate('DATA.diagnostics[0].args[0]')==row;assert page.evaluate('S.source')==source;assert page.evaluate('DATA.pending') is None
   # Cancel before File.text resolves and terminate an actual running Worker.
   page.evaluate('()=>{readDataFile(new File(["id\\nx"],"cancel.csv"));cancelDataImport()}');page.wait_for_timeout(100);assert page.evaluate('!DATA.busy&&!DATA.pending&&DATA.text===null')
-  page.evaluate('()=>{DATA.text="id\\n"+"x\\n".repeat(19000);DATA.format="csv";runDataWorker(true);cancelDataImport()}');page.wait_for_timeout(100);assert page.evaluate('!DATA.busy&&!DATA.pending&&DATA.worker===null')
+  page.evaluate('()=>{DATA.text="id\\n"+"x\\n".repeat(19000);DATA.format="csv";runDataWorker(true);cancelDataImport()}');page.wait_for_timeout(100);assert page.evaluate('!DATA.busy&&!DATA.pending&&DATA.worker===null&&factoryWorkerResources.snapshot().data===0')
   # JSON dry run and actual atomic replacement; canonical export survives import.
   model['name']='Imported '+lang;doc={'schema_version':1,'kind':'model','time_unit':'minutes','model':model}
   page.locator('#data-file').set_input_files({'name':'model.json','mimeType':'application/json','buffer':json.dumps(doc).encode()});page.wait_for_function('()=>!DATA.busy&&DATA.pending?.kind==="model"');assert page.evaluate('S.source')==source
   page.locator('#data-confirm').click();page.wait_for_function('()=>!DATA.busy&&S.model.name.startsWith("Imported")');assert page.evaluate('S.model')==model
   with page.expect_download() as dl:page.locator('#data-export').click()
   assert json.loads(Path(dl.value.path()).read_text())==doc
-  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),lang
+  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth&&factoryWorkerResources.snapshot().data===0'),lang
   assert not errors,errors
   page.close()
  browser.close()

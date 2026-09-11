@@ -51,6 +51,11 @@ class BrowserRuntimeTests(unittest.TestCase):
         self.assertIn('self.postMessage = () =>', worker)
         self.assertNotIn('/api/', worker + controller)
         self.assertIn('worker?.terminate()', controller)
+        self.assertIn('FACTORY_WORKER_RESOURCE_CONTRACT', controller)
+        self.assertIn('factoryWorkerResources.release(this)', controller)
+        self.assertIn('reclaimRequestMemory()', worker)
+        self.assertIn('pyodide.globals.delete(name)', worker)
+        self.assertIn('message.resources?.idle_reclaimed', controller)
 
     def test_runtime_manifest_records_every_download(self):
         cache = ROOT / '.cache' / 'browser-runtime' / 'runtime-manifest.json'

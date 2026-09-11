@@ -1475,7 +1475,11 @@ function persistReplay() {
     else localStorage.removeItem(key);
   } catch { /* Source saving remains independent when a large trace exceeds quota. */ }
 }
-window.addEventListener("pagehide", persistReplay);
+window.addEventListener("pagehide", () => {
+  persistReplay();
+  dataWorkerStop(DATA.worker);
+  browserRuntime?.stop();
+});
 $("#language").onchange = () => {
   const oldLocale = locale;
   const translateOld = text => {

@@ -29,7 +29,7 @@ async function experimentDefinition(name,notes,source,model,seeds,concurrency,ch
  return {name:name.trim(),notes,source,model:snapshot,seeds:[...seeds],concurrency,source_hash,model_hash};
 }
 class ExperimentRunner{
- constructor({factory=()=>new BrowserPythonRuntime(),onUpdate=()=>{}}={}){this.factory=factory;this.onUpdate=onUpdate;this.workers=new Set();this.active=false;this.cancelled=false;}
+ constructor({factory=()=>new BrowserPythonRuntime({role:'experiment'}),onUpdate=()=>{}}={}){this.factory=factory;this.onUpdate=onUpdate;this.workers=new Set();this.active=false;this.cancelled=false;}
  cancel(){if(!this.active)return;this.cancelled=true;for(const worker of this.workers)worker.stop();}
  async run(definition){
   if(this.active)experimentFail('ex_busy');definition=experimentCopy(definition);experimentSeeds(definition.seeds.join(','));if(![1,2].includes(definition.concurrency))experimentFail('ex_invalid');this.active=true;this.cancelled=false;
