@@ -344,18 +344,16 @@ function renderTree() {
 }
 // Replay uses event order, never timestamps; returned objects cannot mutate the trace.
 function stateAt(cursor = S.cursor) {
-  const lots = {}, machines = {};
+  const snapshot=inventoryReplay(S.result,cursor);
+  const lots=copy(snapshot.lots), machines = {};
   for (const m of S.result?.model.machines || []) machines[m.id] = {state: "idle", lot: null};
-  for (const e of S.result?.events.slice(0, cursor) || []) {
-    Object.assign(lots, copy(e.state_changes?.lots || (e.lot ? {[e.lot.id]: e.lot} : {})));
-    Object.assign(machines, copy(e.state_changes?.machines || {}));
-  }
+  Object.assign(machines,copy(snapshot.machines));
   const queues = {};
   const reserved = new Set(Object.values(machines).filter(m => m.state !== "idle").map(m => m.lot));
   for (const id of ["INPUT", ...(S.result?.model.machines.map(m => m.id) || []), "OUTPUT"])
     queues[id] = Object.values(lots).filter(l => l.state === "waiting" && !reserved.has(l.id) && (l.target || l.location) === id)
       .sort((a,b) => a.ready_since - b.ready_since || a.id.localeCompare(b.id)).map(l => l.id);
-  return {lots, machines, queues, time: cursor ? S.result.events[cursor - 1].time : 0};
+  return {lots, machines, queues, time: snapshot.time};
 }
 function renderAllocationComparison() {
   const records = S.result.events.filter(e => ["decision", "blocked"].includes(e.kind));
@@ -657,7 +655,7 @@ function seek(cursor, preserveComparison = false) {
   if (!preserveComparison) {
     const event = S.result?.events[S.cursor - 1];
     const allocation = S.result?.allocations?.find(a => a.id === event?.allocation_id);
-    S.comparison = event?.kind === "decision" || event?.kind === "blocked" ? event.index : allocation?.decision_index ?? S.result?.events.slice(0, S.cursor).findLast(e => ["decision", "blocked"].includes(e.kind))?.index;
+    S.comparison = event?.kind === "decision" || event?.kind === "blocked" ? event.index : allocation?.decision_index ?? inventoryReplay(S.result,S.cursor).lastDecision;
   }
   scheduleReplayPersistence();
   const graphView = graphProjection(),
@@ -993,8 +991,23 @@ function inspectLot(id, refresh = true) {
     renderTrace();
   }
 }
+let replayPreparationAbort=null;
+async function prepareReplayForDisplay(result,isCurrent=()=>true) {
+  if(!result)return;
+  if(result.events.length<=10000)return prepareInventoryReplay(result,{isCurrent});
+  replayPreparationAbort?.abort();
+  const controller=new AbortController(),wasBusy=S.busy;
+  replayPreparationAbort=controller;S.busy=true;
+  $("#run-button").textContent=tr("ui_145");
+  try {
+    await prepareInventoryReplay(result,{signal:controller.signal,isCurrent,
+      onProgress:(done,total)=>status({code:'replay_preparing',args:[done,total]})});
+  } finally {
+    if(replayPreparationAbort===controller){replayPreparationAbort=null;S.busy=controller.signal.aborted?false:wasBusy;if(!S.job)$("#run-button").textContent=tr("ui_152");}
+  }
+}
 async function run() {
-  if (S.job || (PUBLIC_DEMO && browserRuntime.state === "loading")) {
+  if (S.job || replayPreparationAbort || (PUBLIC_DEMO && browserRuntime.state === "loading")) {
     await cancelRun();
     return;
   }
@@ -1063,6 +1076,8 @@ async function run() {
         runtime: copy(browserRuntime.runtime),
       };
     }
+    await prepareReplayForDisplay(p.result,()=>ticket===runSerial&&S.revision===revision);
+    if(ticket!==runSerial||S.revision!==revision)return;
     S.result = p.result;
     S.warnings = p.result.warnings;
     S.warningMessages = p.result.warning_messages || [];
@@ -1079,6 +1094,7 @@ async function run() {
     play();
   } catch (e) {
     if (ticket !== runSerial) return;
+    if(e.name==='AbortError'){status({code:'ui_148'});return;}
     S.console = (e.console || S.console || "") + (e.traceback ? "\n" + e.traceback : "");
     S.runtimeError = e.code === "browser_init_error" ? {code: "public_init_error"} : e.code === "browser_init_timeout" ? {code: "public_init_timeout"} : e.code === "browser_timeout" ? {code: "public_timeout"} : e.detail || e.error_message || e.message;
     S.runtimeErrorLine = e.line || null;
@@ -1096,14 +1112,15 @@ async function run() {
 }
 async function cancelRun() {
   const id = S.job;
-  if (!id && !(PUBLIC_DEMO && browserRuntime.state === "loading")) return;
+  if (!id && !replayPreparationAbort && !(PUBLIC_DEMO && browserRuntime.state === "loading")) return;
+  replayPreparationAbort?.abort();
+  ++runSerial;
   if (PUBLIC_DEMO) {
     ++S.revision;
     clearTimeout(parseTimer);
     browserRuntime.stop();
   }
-  else await api("/api/cancel", { job_id: id });
-  ++runSerial;
+  else if(id)await api("/api/cancel", { job_id: id });
   S.job = null;
   S.busy = false;
   $("#run-button").textContent = tr("ui_152");
@@ -1185,7 +1202,7 @@ $("#run-button").onclick = run;
 $("#save-button").onclick = save;
 $("#reset-button").onclick = async () => {
   if (!PUBLIC_DEMO) return;
-  if (S.job) await cancelRun();
+  if (S.job||replayPreparationAbort) await cancelRun();
   browserRuntime.stop();
   pause();
   setSource(S.example);
@@ -1200,6 +1217,7 @@ $("#reset-button").onclick = async () => {
   try {
     localStorage.removeItem("factory-studio.public.source.v1");
     localStorage.removeItem("factory-studio.public.replay.v1");
+    localStorage.removeItem("factory-studio.public.replay.v1.position");
   } catch {}
   diagnostics(); renderTree(); renderGraph(); seek(1); selectTab("events");
   status({code: "public_reset_done"});
@@ -1263,7 +1281,7 @@ $("#file-input").onchange = async (e) => {
     const source = await file.text();
     if (PUBLIC_DEMO) await browserRuntime.parse(source);
     else await api("/api/parse", { source });
-    if (S.job) await cancelRun();
+    if (S.job||replayPreparationAbort) await cancelRun();
     invalidateTrace();
     setSource(source);
     closeInspector();
@@ -1431,7 +1449,8 @@ async function boot() {
       try { source = localStorage.getItem("factory-studio.public.source.v1") || source; } catch {}
       setSource(source);
       await nextRenderTurn();
-      S.model = data.result.model; S.result = source === data.source ? copy(data.result) : null; S.valid = source === data.source;
+      await prepareInventoryReplay(data.result);
+      S.model = data.result.model; S.result = source === data.source ? data.result : null; S.valid = source === data.source;
       S.warnings = data.result.warnings; S.warningMessages = data.result.warning_messages;
       const runtime = data.version.browser_runtime;
       $("#demo-version").textContent = `${data.version.source_revision} · trace v${data.result.schema_version} · Pyodide ${runtime.pyodide} · Python ${runtime.python} · SimPy ${runtime.simpy} · ${data.version.trace_sha256}`;
@@ -1439,8 +1458,10 @@ async function boot() {
         await applyCode(true);
       }
       try {
-        const saved = JSON.parse(localStorage.getItem("factory-studio.public.replay.v1"));
+        const saved = readReplay("factory-studio.public.replay.v1");
         if (saved?.source === source && saved.result?.schema_version === 2) {
+          const revision=S.revision;
+          await prepareReplayForDisplay(saved.result,()=>revision===S.revision);
           S.model = saved.result.model; S.result = saved.result; S.valid = true;
           S.cursor = Number.isInteger(saved.cursor) && saved.cursor >= 0 && saved.cursor <= S.result.events.length ? saved.cursor : 1;
           S.tab = saved.tab || "events";
@@ -1470,8 +1491,10 @@ async function boot() {
     setSource(source);
     await applyCode(true);
     try {
-      const saved = JSON.parse(localStorage.getItem("factory-studio.replay.v1"));
+      const saved = readReplay("factory-studio.replay.v1");
       if (saved?.source === S.source && saved.result?.schema_version === 2) {
+        const revision=S.revision;
+        await prepareReplayForDisplay(saved.result,()=>revision===S.revision);
         S.result = saved.result; S.cursor = saved.cursor; S.tab = saved.tab || "events";
         S.resultsFinal = saved.resultsFinal || false; S.resultFilters = saved.filters || {};
         S.warnings = S.result.warnings; S.warningMessages = S.result.warning_messages || [];
@@ -1565,19 +1588,54 @@ function renderAllocationResults() {
   });
 }
 
-let replayResultCache = null, replayResultCacheValue = "", replayPersistenceHandle = null;
+let replayPersistence=null, replayPersistenceHandle=null;
+// Large immutable snapshots are serialized in short tasks. Cursor writes remain
+// synchronous and small, including while this cancellable snapshot job is pending.
+async function storeLargeReplay(job,result,source) {
+  const yieldTask=()=>new Promise(resolve=>setTimeout(resolve,0));
+  try {
+    await yieldTask();
+    const chunks=[];let batch=[],started=performance.now(),characters=0;
+    for(let i=0;i<result.events.length;i++){
+      if(replayPersistence!==job)return;
+      const serialized=JSON.stringify(result.events[i]);characters+=serialized.length+1;
+      // localStorage is a convenience recovery cache, never the export path.
+      // Bound both temporary strings and quota work before joining a huge trace.
+      if(characters>2000000)return;
+      batch.push(serialized);
+      if(performance.now()-started>=6){chunks.push(batch.join(','));batch=[];await yieldTask();started=performance.now();}
+    }
+    if(batch.length)chunks.push(batch.join(','));
+    if(replayPersistence!==job)return;
+    const fields=[];
+    for(const key of Object.keys(result))if(key!=='events')fields.push(JSON.stringify(key)+':'+JSON.stringify(result[key]));
+    const body='{'+fields.join(',')+',"events":['+chunks.join(',')+']}';
+    if(replayPersistence!==job)return;
+    const header=JSON.stringify({_snapshotId:job.id,source,cursor:job.cursor,tab:job.tab,resultsFinal:job.resultsFinal,filters:job.filters});
+    localStorage.setItem(job.key,header.slice(0,-1)+',"result":'+body+'}');
+  }catch{/* Keep independently saved source and avoid retrying an oversized trace. */}
+}
+function readReplay(key) {
+  const saved=JSON.parse(localStorage.getItem(key));
+  if(saved?._snapshotId){
+    let position;try{position=JSON.parse(localStorage.getItem(key+'.position'));}catch{}
+    if(position?._snapshotId===saved._snapshotId)for(const field of ['cursor','tab','resultsFinal','filters'])if(Object.hasOwn(position,field))saved[field]=position[field];
+    replayPersistence={key,result:saved.result,source:saved.source,id:saved._snapshotId};
+  }
+  return saved;
+}
 function persistReplay() {
   try {
     const key = PUBLIC_DEMO ? "factory-studio.public.replay.v1" : "factory-studio.replay.v1";
-    if (S.result) {
-      if (replayResultCache !== S.result) {
-        replayResultCache = S.result;
-        replayResultCacheValue = JSON.stringify(S.result);
+    if(S.result){
+      if(replayPersistence?.result!==S.result||replayPersistence?.source!==S.source||replayPersistence?.key!==key){
+        const id=crypto.randomUUID();replayPersistence={key,result:S.result,source:S.source,id,cursor:S.cursor,tab:S.tab,resultsFinal:S.resultsFinal,filters:S.resultFilters};
+        localStorage.removeItem(key);localStorage.removeItem(key+'.position');
+        if(S.result.events.length>10000)void storeLargeReplay(replayPersistence,S.result,S.source);
+        else localStorage.setItem(key,JSON.stringify({_snapshotId:id,source:S.source,result:S.result,cursor:S.cursor,tab:S.tab,resultsFinal:S.resultsFinal,filters:S.resultFilters}));
       }
-      const payload = `{"source":${JSON.stringify(S.source)},"result":${replayResultCacheValue},"cursor":${S.cursor},"tab":${JSON.stringify(S.tab)},"resultsFinal":${Boolean(S.resultsFinal)},"filters":${JSON.stringify(S.resultFilters)}}`;
-      localStorage.setItem(key, payload);
-    }
-    else localStorage.removeItem(key);
+      localStorage.setItem(key+'.position',JSON.stringify({_snapshotId:replayPersistence.id,cursor:S.cursor,tab:S.tab,resultsFinal:S.resultsFinal,filters:S.resultFilters}));
+    }else{replayPersistence=null;localStorage.removeItem(key);localStorage.removeItem(key+'.position');}
   } catch { /* Source saving remains independent when a large trace exceeds quota. */ }
 }
 function scheduleReplayPersistence() {
@@ -1601,6 +1659,7 @@ function invalidatePendingValidation() {
   validationGeneration++;
 }
 window.addEventListener("pagehide", () => {
+  replayPreparationAbort?.abort();
   flushReplayPersistence();
   // Invalidate deferred producers before terminating current consumers. A
   // persisted BFCache page keeps its UI/source, but performs no hidden work;

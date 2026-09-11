@@ -54,6 +54,65 @@ class InventoryProjectionTests(unittest.TestCase):
             events.append(dict(index=i,time=0,kind='blocked' if id=='B' else 'arrival',lot=lot,state_changes={'lots':{id:lot},'machines':{'M':{'state':'reserved','lot':'R'}}}))
         return dict(model={'machines':[{'id':'M','process':'P1','line':'A'}], 'routes':[]},events=events,summary={'horizon':20})
 
+    def test_cached_adapter_matches_standalone_graph_at_backward_cursors(self):
+        graph=(ROOT/'web/graph-state.js').read_text()
+        # The standalone implementation remains an independent prefix replay oracle.
+        self.page.evaluate('(s)=>{window.graphOracle=Function(s+";return graphStateProjection")()}',graph.replace("typeof inventoryReplay==='function'",'false'))
+        self.page.evaluate('(s)=>{window.graphIndexed=Function(s+";return graphStateProjection")()}',graph)
+        trace=Factory(simple()).run()
+        # Legacy actor-only events must not become graph state_changes.
+        trace['events'].append(dict(index=len(trace['events']),time=999,kind='ready',lot=dict(id='ACTOR',state='waiting',location='INPUT')))
+        result=self.page.evaluate('''r=>{const before=JSON.stringify(r), n=r.events.length;
+          for(const c of [0,n,n-1,1,Math.floor(n/2),n,0]){
+            for(const final of [false,true])if(JSON.stringify(graphOracle(r,c,final))!==JSON.stringify(graphIndexed(r,c,final)))return {cursor:c,final};
+          }
+          return before===JSON.stringify(r);
+        }''',trace)
+        self.assertIs(result,True)
+
+    def test_cache_replacement_and_cursor_order_preserve_inventory(self):
+        trace=Factory(simple()).run()
+        result=self.page.evaluate('''r=>{
+          const original=JSON.stringify(r), n=r.events.length;
+          const snapshots=new Map();
+          for(const c of [n,0,1,Math.floor(n/2),n-1,n,0]){
+            const actual=JSON.stringify(inventoryProjection(r,c));
+            const decision=r.events.slice(0,c).findLast(e=>e.kind==='decision'||e.kind==='blocked')?.index;
+            if(inventoryReplay(r,c).lastDecision!==decision)return false;
+            if(snapshots.has(c)&&snapshots.get(c)!==actual)return false;
+            snapshots.set(c,actual);
+          }
+          r.events=[...r.events.slice(0,1)];
+          const p=inventoryProjection(r,1);
+          return p.cursor===1&&p.rows.length===1&&JSON.stringify({...r,events:JSON.parse(original).events})===original;
+        }''',trace)
+        self.assertTrue(result)
+
+    def test_yielded_preparation_abort_stale_identity_and_retry_are_atomic(self):
+        trace=Factory(simple()).run()
+        result=self.page.evaluate('''async r=>{
+          const source=r.events;r.events=Array.from({length:40000},(_,i)=>({...source[i%source.length],index:i}));
+          const before=JSON.stringify(r),controller=new AbortController();let progress=0,ticks=0;
+          const timer=setInterval(()=>ticks++,0);let aborted=false,stale=false;
+          try{await prepareInventoryReplay(r,{signal:controller.signal,onProgress:(n,total)=>{progress++;if(n<total)controller.abort();}});}catch(e){aborted=e.name==='AbortError';}
+          const partial=inventoryIndexes.has(r);
+          const pending=prepareInventoryReplay(r);setTimeout(()=>r.events=[...r.events],0);
+          try{await pending;}catch(e){stale=e.name==='AbortError';}
+          const stalePublished=inventoryIndexes.has(r);
+          await prepareInventoryReplay(r);clearInterval(timer);
+          const cached=inventoryIndexes.get(r),expected={};
+          for(const e of r.events)Object.assign(expected,e.state_changes?.lots||{});
+          return {aborted,stale,partial,stalePublished,progress,ticks,ready:inventoryIndexCurrent(r,cached),
+            exact:JSON.stringify(inventoryReplay(r,r.events.length).lots)===JSON.stringify(expected),unchanged:JSON.stringify(r)===before};
+        }''',trace)
+        self.assertTrue(result['aborted'],result)
+        self.assertTrue(result['stale'],result)
+        self.assertFalse(result['partial'],result)
+        self.assertFalse(result['stalePublished'],result)
+        self.assertGreater(result['progress'],0)
+        self.assertGreater(result['ticks'],0)
+        self.assertTrue(result['ready'] and result['exact'] and result['unchanged'],result)
+
     def test_all_states_wait_zero_and_no_future(self):
         trace=self.fixture()
         prefix=self.project(trace,7)

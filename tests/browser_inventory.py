@@ -24,7 +24,7 @@ with sync_playwright() as p:
     oracle={}
     for e in trace['events'][:cursor]:oracle.update(e['state_changes']['lots'])
     assert int(page.locator('#wip-total').inner_text())==sum(l['state']!='completed' for l in oracle.values())
-    assert page.locator('#wip-lots tbody tr').count()==len(oracle)
+    assert page.locator('#wip-lots tbody tr').count()==min(page.evaluate('WIP_PAGE_SIZE'),len(oracle))
    page.locator('#wip-view').select_option('final')
    assert page.evaluate('wipProjection().time')==trace['summary']['horizon']
    for key in ['process','line','location']:
@@ -32,7 +32,7 @@ with sync_playwright() as p:
     if values:
      page.locator(f'[data-wip-filter="{key}"]').select_option(values[0])
      assert page.evaluate('(key)=>wipProjection().rows.every(r=>r[key]===WIP.filters[key])',key)
-     assert page.locator('#wip-lots tbody tr').count()==int(page.locator('#wip-visible').inner_text())
+     assert page.locator('#wip-lots tbody tr').count()==min(page.evaluate('WIP_PAGE_SIZE'),int(page.locator('#wip-visible').inner_text()))
      page.locator('#wip-reset').click()
    page.locator('#wip-group').select_option('process')
    page.locator('[data-wip-group]').first.click()

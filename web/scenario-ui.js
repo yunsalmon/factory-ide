@@ -4,10 +4,13 @@ const scenarioStorage='factory-studio.scenarios.v1';
 function scenarioSaveStorage(){try{localStorage.setItem(scenarioStorage,JSON.stringify(scenarioArtifact(SCENARIOS.items,SCENARIOS.baseline,SCENARIOS.candidate)));}catch{SCENARIOS.error='sc_storage';}}
 function scenarioNumber(n,signed=false){return n===null?tr('sc_unavailable'):new Intl.NumberFormat(locale,{maximumFractionDigits:4,signDisplay:signed?'exceptZero':'auto'}).format(n);}
 function scenarioLabel(key){if(key.startsWith('state:')){const parts=key.split(':');return `${tr('sc_utilization')} · ${parts.slice(1,-1).join(':')} · ${tr('ops_state_'+parts.at(-1))}`;}if(key.startsWith('buffer:'))return `${tr('sc_buffer')} · ${key.slice(7)}`;return tr('sc_'+key);}
-function scenarioLoadResult(index,event=null){
+async function scenarioLoadResult(index,event=null){
   if(S.job||S.busy)return;
   clearTimeout(parseTimer);
-  const item=SCENARIOS.items[index];pause();setSource(item.source);S.model=copy(item.result.model);S.result=copy(item.result);S.valid=true;S.lot=null;S.selected=null;S.runtimeError=null;
+  const item=SCENARIOS.items[index],ticket=++runSerial,revision=S.revision;pause();
+  try{await prepareReplayForDisplay(item.result,()=>ticket===runSerial&&revision===S.revision);}catch(error){if(error.name!=='AbortError')toast({code:'sc_invalid'});return;}
+  if(ticket!==runSerial||revision!==S.revision)return;
+  setSource(item.source);S.model=copy(item.result.model);S.result=item.result;S.valid=true;S.lot=null;S.selected=null;S.runtimeError=null;
   S.warnings=S.result.warnings||[];S.warningMessages=S.result.warning_messages||[];$('#inspector').hidden=true;renderTree();diagnostics();
   seek(event===null?S.result.events.length:event+1);selectTab(event===null?'events':'allocations');
   if(event!==null){if(S.result.events[event]?.kind==='decision'){S.comparison=event;renderAllocationComparison();}else{selectTab('events');inspectEvent(event);}}
