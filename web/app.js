@@ -8,8 +8,26 @@ const esc = (s) =>
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
   );
 const copy = (v) => JSON.parse(JSON.stringify(v));
-const replayNumberFormats=new Map();
-const fmt = (n) => {if(!replayNumberFormats.has(locale))replayNumberFormats.set(locale,new Intl.NumberFormat(locale,{minimumFractionDigits:1,maximumFractionDigits:1}));return replayNumberFormats.get(locale).format(Number(n||0));};
+const nextRenderTurn = () => new Promise(resolve => requestAnimationFrame(resolve));
+async function revealInitialPanels() {
+  for (const panel of $$('[data-boot-stage]')) {
+    panel.removeAttribute('data-boot-stage');
+    await nextRenderTurn();
+  }
+  document.documentElement.dataset.uiReady = 'true';
+}
+const numberFormatters = new Map();
+function formatNumber(value, options) {
+  const key = `${locale}:${JSON.stringify(options)}`;
+  let formatter = numberFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, options);
+    numberFormatters.set(key, formatter);
+  }
+  return formatter.format(value);
+}
+const fmt = (n) => formatNumber(Number(n || 0), {minimumFractionDigits: 1, maximumFractionDigits: 1});
+const preciseNumber = (n) => formatNumber(n, {maximumFractionDigits: 6});
 const S = {
   token: "",
   source: "",
@@ -47,6 +65,10 @@ let parseTimer,
   editor = null,
   settingEditor = false,
   errorLine = null;
+let graphRenderKey = null;
+let localeChangeGeneration = 0;
+const eventPageSize = 40;
+let eventPage = 0, eventPageCursor = -1, eventPageResult = null, eventPageLot = null;
 const browserRuntime = PUBLIC_DEMO
   ? new BrowserPythonRuntime({onState: (state, runtime) => renderRuntimeState(state, runtime)})
   : null;
@@ -439,21 +461,32 @@ function renderGraphOperationDetail(projection = graphProjection()) {
   if (focusId && document.getElementById(focusId)) document.getElementById(focusId).focus({preventScroll:true});
 }
 
-function renderGraph() {
+function renderGraph(inventoryView = null, graphView = null) {
   if (!S.model) return;
+  const viewport = $("#graph-viewport"),
+    finalView = S.tab === "wip" ? WIP.finalView : S.tab === "operations" ? S.operationScope !== "cursor" : S.tab === "orders" ? PLANNER.finalView : false,
+    renderKey = [S.model, S.result, S.cursor, finalView, S.tab === "wip", S.lot,
+      S.selected?.type, S.selected?.id, WIP.selectedLot, WIP.selectedGroup, locale,
+      autoFit, autoFit ? viewport.clientWidth : S.zoom];
+  if (graphRenderKey && renderKey.every((value, index) => graphRenderKey[index] === value)) {
+    if ($("#graph-operation-detail:empty")) renderGraphOperationDetail(graphView || graphProjection());
+    return;
+  }
   const { positions, groups, rows, width, height } = graphLayout();
   if (autoFit)
-    S.zoom = Math.min(1.15, Math.max(0.38, ($("#graph-viewport").clientWidth - 12) / width));
-  const projection = graphProjection(),
+    S.zoom = Math.min(1.15, Math.max(0.38, (viewport.clientWidth - 12) / width));
+  const projection = graphView || graphProjection(),
     { lots, machines } = projection,
     active = S.result?.events[projection.cursor - 1];
-  const routeHistory = new Set(
-    S.lot
-      ? (S.result?.events.slice(0, projection.cursor) || [])
-          .filter((e) => e.lot?.id === S.lot && e.kind === "move")
-          .map((e) => e.route)
-      : [],
-  );
+  const routeHistory = new Set(), terminalCounts = {INPUT: 0, OUTPUT: 0}, waitingCounts = new Map();
+  if (S.lot) for (let index = 0; index < projection.cursor; index++) {
+    const event = S.result.events[index];
+    if (event.lot?.id === S.lot && event.kind === "move") routeHistory.add(event.route);
+  }
+  for (const lot of Object.values(lots)) {
+    if (Object.hasOwn(terminalCounts, lot.location)) terminalCounts[lot.location]++;
+    if (lot.state === "waiting") waitingCounts.set(lot.location, (waitingCounts.get(lot.location) || 0) + 1);
+  }
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * S.zoom}" height="${height * S.zoom}" viewBox="0 0 ${width} ${height}" role="group" aria-label="${tr("ui_62")}"><defs><marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#a6bca6"/></marker><marker id="arrow-active" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="#32855c"/></marker></defs>`;
   for (const { p, x } of groups) {
     svg += `<rect x="${x}" y="21" width="165" height="${height - 40}" rx="11" fill="#f7faf5" fill-opacity=".85" stroke="#e7eee2"/><text x="${x + 15}" y="47" class="process-heading">${esc(p.name)}</text><text x="${x + 143}" y="47" class="process-number">${String(groups.findIndex((g) => g.p === p) + 1).padStart(2, "0")}</text>`;
@@ -482,15 +515,13 @@ function renderGraph() {
   }
   for (const terminal of ["INPUT", "OUTPUT"]) {
     const p = positions[terminal],
-      count = Object.values(lots).filter((l) => l.location === terminal).length;
+      count = terminalCounts[terminal];
     svg += `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="8" class="graph-terminal" data-terminal="${terminal}"/><text x="${p.x + p.w / 2}" y="${p.y + 17}" text-anchor="middle" class="terminal-text">${terminal}</text><text x="${p.x + p.w / 2}" y="${p.y + 31}" text-anchor="middle" class="terminal-text">${count} lots</text>`;
   }
   for (const m of S.model.machines) {
     const p = positions[m.id],
       state = machines[m.id],
-      waiting = Object.values(lots).filter(
-        (l) => l.location === m.id && l.state === "waiting",
-      ).length;
+      waiting = waitingCounts.get(m.id) || 0;
     const selected = S.selected?.id === m.id;
     const stateLabel = traceStateLabel(state.state), detail = graphMachineDescription(m, state, projection);
     svg += `<g class="machine-node ${esc(state?.state || "")} ${selected ? "selected" : ""}" data-node="${esc(m.id)}" tabindex="0" role="button" aria-label="${esc(detail)}"><title>${esc(detail)}</title><rect class="node-bg" x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="7"/><rect x="${p.x + 10}" y="${p.y + 11}" width="20" height="20" rx="5" fill="${state?.state === "processing" ? "#d7ebda" : "#eff3ea"}"/><path d="M${p.x + 15} ${p.y + 25}v-8h4v4h5v4z" fill="none" stroke="#719069" stroke-width="1.2"/><text x="${p.x + 37}" y="${p.y + 21}" class="node-name">${esc(m.name.length > 10 ? m.name.slice(0, 9) + "…" : m.name)}</text><text x="${p.x + 37}" y="${p.y + 33}" class="node-meta">${esc(m.id)} · ${m.time}m</text><line x1="${p.x + 10}" y1="${p.y + 41}" x2="${p.x + p.w - 10}" y2="${p.y + 41}" stroke="#edf2e8"/><circle cx="${p.x + 13}" cy="${p.y + 51}" r="2.4" fill="${state?.state === "processing" ? "#51a277" : ["reserved", "setup", "resource_wait", "blocked"].includes(state.state) ? "#d5a45a" : ["down", "maintenance", "offshift"].includes(state.state) ? "#80677a" : "#b6c5b0"}"/><text x="${p.x + 21}" y="${p.y + 54}" class="node-status">${esc(stateLabel)}</text><text x="${p.x + 10}" y="${p.y + 68}" class="node-meta">${esc(state.lot ? (state.lot.length > 14 ? state.lot.slice(0, 13) + "…" : state.lot) : "—")}</text><text x="${p.x + p.w - 10}" y="${p.y + 68}" text-anchor="end" class="node-meta">${tr("ui_2")} ${waiting}</text></g>`;
@@ -499,7 +530,7 @@ function renderGraph() {
   $("#graph").innerHTML = svg;
   $("#zoom-label").textContent = Math.round(S.zoom * 100) + "%";
   $("#graph-scope").textContent = `${tr(projection.finalView ? "wip_final" : "wip_replay")} · ${fmt(projection.time)} min`;
-  highlightWipGraph();
+  highlightWipGraph(inventoryView);
   renderGraphOperationDetail(projection);
   $$("[data-node]").forEach((g) => {
     g.onclick = () => { pause(); inspectMachine(g.dataset.node); $("#graph-operation-detail")?.focus({preventScroll:true}); };
@@ -513,9 +544,10 @@ function renderGraph() {
       if (e.key === "Enter") g.onclick();
     };
   });
+  graphRenderKey = renderKey;
 }
-function renderMetrics() {
-  const { lots, time } = inventoryReplay(S.result,S.cursor),
+function renderMetrics(snapshot = stateAt()) {
+  const { lots, time } = snapshot,
     all = Object.values(lots),
     done = all.filter((l) => l.state === "completed");
   $("#metric-time").innerHTML = `${fmt(time)} <small>min</small>`;
@@ -524,11 +556,11 @@ function renderMetrics() {
   $("#metric-cycle").innerHTML =
     `${done.length ? fmt(done.reduce((sum, l) => sum + l.completed - l.created, 0) / done.length) : "—"} <small>min</small>`;
 }
-function renderPlayback() {
+function renderPlayback(snapshot = stateAt()) {
   const count = S.result?.events.length || 0;
   $("#timeline").max = count;
   $("#timeline").value = S.cursor;
-  $("#timeline-time").textContent = fmt(S.result?.events[S.cursor-1]?.time??0) + " min";
+  $("#timeline-time").textContent = fmt(snapshot.time) + " min";
   $("#timeline-end").textContent = `${S.cursor} / ${count}`;
   $("#play-button").textContent = S.playing ? "Ⅱ" : "▶";
   for (const id of ["play-button", "step-button", "rewind-button", "export-trace"])
@@ -537,13 +569,14 @@ function renderPlayback() {
 }
 function selectTab(tab) {
   S.tab = tab;
-  renderGraph();
+  const inventoryView = tab === "wip" && S.result ? wipProjection() : null;
+  renderGraph(inventoryView);
   $$("[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-  renderTrace();
+  renderTrace(inventoryView);
 }
-function renderTrace() {
-  const container = $("#trace-content"),
-    events = S.result?.events.slice(0, S.cursor) || [];
+function renderTrace(inventoryView = null) {
+  const container = $("#trace-content");
+  container.dataset.renderedTab = S.tab;
   if (S.tab === "console") {
     container.innerHTML = `<pre class="console ${S.parseError ? "error" : ""}">${esc([S.parseError, ...S.warnings.map((w,i) => localized(w, S.warningMessages?.[i])), S.console, displayMessage(S.runtimeError)].filter(Boolean).join("\n\n") || tr("ui_67"))}</pre>`;
     return;
@@ -558,9 +591,10 @@ function renderTrace() {
       `<div class="empty"><b>${tr("ui_68")}</b>${tr("ui_69")}<br>${tr("ui_70")}</div>`;
     return;
   }
-  if (S.tab === "wip") { renderInventory(); return; }
+  if (S.tab === "wip") { renderInventory(inventoryView); return; }
   if (S.tab === "results") { renderAllocationResults(); return; }
   if (S.tab === "allocations") { renderAllocationComparison(); return; }
+  const events = S.result.events.slice(0, S.cursor);
   if (S.tab === "utilization") {
     const time = stateAt().time,
       spans = {},
@@ -589,16 +623,25 @@ function renderTrace() {
     $$("[data-lot]").forEach((r) => (r.onclick = () => inspectLot(r.dataset.lot)));
     return;
   }
-  const filtered = events
-    .filter((e) => !S.lot || e.lot?.id === S.lot)
-    .slice(-150)
-    .reverse();
+  const matching = events.filter((e) => !S.lot || e.lot?.id === S.lot);
+  if (eventPageCursor !== S.cursor || eventPageResult !== S.result || eventPageLot !== S.lot) {
+    eventPage = 0; eventPageCursor = S.cursor; eventPageResult = S.result; eventPageLot = S.lot;
+  }
+  const pageCount = Math.max(1, Math.ceil(matching.length / eventPageSize));
+  eventPage = Math.min(eventPage, pageCount - 1);
+  const newerOffset = eventPage * eventPageSize,
+    pageEnd = matching.length - newerOffset,
+    pageStart = Math.max(0, pageEnd - eventPageSize),
+    filtered = matching.slice(pageStart, pageEnd).reverse(),
+    pager = pageCount > 1 ? `<nav class="event-pages" aria-label="${tr("event_page_label")}"><button id="event-newer" ${eventPage === 0 ? "disabled" : ""}>${tr("event_page_newer")}</button><span>${tr("event_page_status", [eventPage + 1, pageCount])}</span><button id="event-older" ${eventPage === pageCount - 1 ? "disabled" : ""}>${tr("event_page_older")}</button></nav>` : "";
   container.innerHTML =
     (S.lot
       ? `<div class="lot-filter">${esc(S.lot)} ${tr("ui_75")}<button id="clear-lot">${tr("ui_76")}</button></div>`
       : "") +
-    `<table><thead><tr><th>${tr("event_time")}</th><th>${tr("event_lot")}</th><th>${tr("event_kind")}</th><th>${tr("event_location")}</th><th>${tr("event_detail")}</th></tr></thead><tbody>${filtered.map((e) => `<tr class="clickable ${e.index === S.cursor - 1 ? "current" : ""}" data-event="${e.index}"><td class="mono">${fmt(e.time)}</td><td class="mono">${esc(e.lot?.id || "—")}</td><td><span class="kind ${e.kind}">${kinds[e.kind] || esc(e.kind)}</span></td><td>${esc(e.machine || e.lot?.location || "—")}</td><td>${esc(e.kind === "decision" ? localized(e.reason, e.reason_message) : e.kind === "move" ? `${e.lot.location} → ${e.lot.target}` : e.kind === "start" ? (e.duration === null ? tr("ui_77") : `${tr("ui_78")} ${fmt(e.duration)} min`) : localized(e.reason, e.reason_message) || e.route || "—")}</td></tr>`).join("")}</tbody></table>`;
+    `${pager}<table><thead><tr><th>${tr("event_time")}</th><th>${tr("event_lot")}</th><th>${tr("event_kind")}</th><th>${tr("event_location")}</th><th>${tr("event_detail")}</th></tr></thead><tbody>${filtered.map((e) => `<tr class="clickable ${e.index === S.cursor - 1 ? "current" : ""}" data-event="${e.index}"><td class="mono">${fmt(e.time)}</td><td class="mono">${esc(e.lot?.id || "—")}</td><td><span class="kind ${e.kind}">${kinds[e.kind] || esc(e.kind)}</span></td><td>${esc(e.machine || e.lot?.location || "—")}</td><td>${esc(e.kind === "decision" ? localized(e.reason, e.reason_message) : e.kind === "move" ? `${e.lot.location} → ${e.lot.target}` : e.kind === "start" ? (e.duration === null ? tr("ui_77") : `${tr("ui_78")} ${fmt(e.duration)} min`) : localized(e.reason, e.reason_message) || e.route || "—")}</td></tr>`).join("")}</tbody></table>`;
   $$("[data-event]").forEach((r) => (r.onclick = () => inspectEvent(Number(r.dataset.event))));
+  if ($("#event-newer")) $("#event-newer").onclick = () => { eventPage--; renderTrace(); };
+  if ($("#event-older")) $("#event-older").onclick = () => { eventPage++; renderTrace(); };
   if ($("#clear-lot"))
     $("#clear-lot").onclick = () => {
       S.lot = null;
@@ -614,11 +657,14 @@ function seek(cursor, preserveComparison = false) {
     const allocation = S.result?.allocations?.find(a => a.id === event?.allocation_id);
     S.comparison = event?.kind === "decision" || event?.kind === "blocked" ? event.index : allocation?.decision_index ?? inventoryReplay(S.result,S.cursor).lastDecision;
   }
-  persistReplay();
-  renderPlayback();
-  renderMetrics();
-  renderGraph();
-  renderTrace();
+  scheduleReplayPersistence();
+  const graphView = graphProjection(),
+    cursorView = graphView.finalView ? stateAt() : graphView,
+    inventoryView = S.tab === "wip" ? wipProjection() : null;
+  renderPlayback(cursorView);
+  renderMetrics(cursorView);
+  renderGraph(inventoryView, graphView);
+  renderTrace(inventoryView);
   if (S.selected?.type === "lot") inspectLot(S.selected.id, false);
 }
 function pause() {
@@ -1262,7 +1308,14 @@ window.addEventListener("keydown", (e) => {
 new ResizeObserver(() => {
   if (S.model) renderGraph();
 }).observe($("#graph-viewport"));
-if (window.CodeMirror) {
+function enhanceEditor(selection = null) {
+  if (editor || !window.CodeMirror) return editor;
+  const textarea = $("#code");
+  selection ||= {
+    start: textarea.selectionStart,
+    end: textarea.selectionEnd,
+    direction: textarea.selectionDirection || "none",
+  };
   editor = CodeMirror.fromTextArea($("#code"), {
     mode: { name: "python", version: 3 },
     theme: "factory",
@@ -1351,13 +1404,43 @@ if (window.CodeMirror) {
   });
   editor.on("cursorActivity", updateEditor);
   new ResizeObserver(() => editor.refresh()).observe($(".editor-panel"));
+  const anchor = selection.direction === "backward" ? selection.end : selection.start;
+  const head = selection.direction === "backward" ? selection.start : selection.end;
+  editor.setSelection(editor.posFromIndex(anchor), editor.posFromIndex(head), {scroll: false});
+  editor.focus();
+  return editor;
 }
+enhanceEditor();
+$("#enhance-editor").onclick = async () => {
+  const button = $("#enhance-editor"), textarea = $("#code");
+  const selection = {start: textarea.selectionStart, end: textarea.selectionEnd, direction: textarea.selectionDirection || "none"};
+  button.disabled = true;
+  try {
+    await window.loadEnhancedEditor?.(selection);
+    button.hidden = Boolean(editor);
+  } catch (error) {
+    button.disabled = false;
+    window.showFactoryLoadFailure?.("editor", error.message);
+  }
+};
+if (editor) $("#enhance-editor").hidden = true;
 async function boot() {
   try {
+    await window.initialLocaleReady;
+    translateStatic();
+    if (!PUBLIC_DEMO) {
+      try {
+        await window.loadEnhancedEditor?.();
+        if (editor) $("#enhance-editor").hidden = true;
+      } catch (error) {
+        window.showFactoryLoadFailure?.("editor", error.message);
+      }
+    }
     if (PUBLIC_DEMO) {
       const response = await fetch("/demo.json");
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
+      await nextRenderTurn();
       S.example = data.source;
       S.demoResult = copy(data.result);
       S.demoVersion = data.version;
@@ -1365,6 +1448,7 @@ async function boot() {
       let source = data.source;
       try { source = localStorage.getItem("factory-studio.public.source.v1") || source; } catch {}
       setSource(source);
+      await nextRenderTurn();
       await prepareInventoryReplay(data.result);
       S.model = data.result.model; S.result = source === data.source ? data.result : null; S.valid = source === data.source;
       S.warnings = data.result.warnings; S.warningMessages = data.result.warning_messages;
@@ -1386,11 +1470,14 @@ async function boot() {
           restoredPublicReplay = true;
         }
       } catch {}
+      await nextRenderTurn();
       $("#project-name").textContent = S.model.name;
-      diagnostics(); renderTree(); renderGraph();
+      diagnostics(); renderTree();
+      await nextRenderTurn();
       seek(S.result ? (restoredPublicReplay ? S.cursor : 1) : 0);
       selectTab(S.result ? S.tab : "console");
       status({code: "public_ready"});
+      await revealInitialPanels();
       return;
     }
     const data = await api("/api/bootstrap");
@@ -1417,9 +1504,11 @@ async function boot() {
     renderPlayback();
     renderTrace();
     status({code: "ui_160"});
+    await revealInitialPanels();
   } catch (e) {
     status({code: "ui_161"});
     toast(e.detail || e.message);
+    await revealInitialPanels();
   }
 }
 boot();
@@ -1450,13 +1539,13 @@ function selectResult(row) {
 function renderAllocationResults() {
   const projection = allocationResults(S.result, S.cursor, S.resultsFinal, S.resultFilters);
   const {rows, time} = projection;
-  const model = S.result.model;
+  const model = S.result.model, columns = allocationColumns();
   const statuses = [tr("ui_163"), tr("ui_164"), tr("ui_165"), tr("ui_29"), tr("ui_30"), tr("ui_166"), tr("ui_167"), tr("ui_168"), tr("ui_169")];
   const choices = {process: model.processes.map(p => p.id), line: model.machines.map(m => m.line),
     machine: ["INPUT", ...model.machines.map(m => m.id), "OUTPUT"], lot: S.result.events.filter(e => e.kind === "arrival").map(e => e.lot.id), status: statuses};
   const names = {process: tr("ui_89"), line: tr("ui_90"), machine: tr("ui_40"), lot: tr("ui_35"), status: tr("ui_37")};
   const filterHTML = Object.entries(choices).map(([key,values]) => `<label>${names[key]} <select data-result-filter="${key}"><option value="">${tr("ui_170")}</option>${[...new Set(values)].map(v => `<option value="${esc(v)}" ${S.resultFilters[key] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`).join("");
-  $("#trace-content").innerHTML = `<div class="allocation-results"><div class="result-controls"><label>${tr("ui_171")} <select id="results-view"><option value="replay" ${!S.resultsFinal ? "selected" : ""}>${tr("ui_172")}</option><option value="final" ${S.resultsFinal ? "selected" : ""}>${tr("ui_173")}</option></select></label>${filterHTML}<label>${tr("ui_174")} <input id="result-search" value="${esc(S.resultFilters.search || "")}" type="search"></label><button id="result-reset">${tr("ui_175")}</button><button id="result-csv">${tr("ui_176")}</button></div><p id="result-context">${S.resultsFinal ? tr("ui_177") : `${tr("ui_178")} ${S.cursor}`} · ${time} min · ${rows.length}${tr("ui_179")} ${Object.values(S.resultFilters).some(Boolean) ? tr("ui_180") : tr("ui_181")}${tr("ui_182")}</p><div class="result-table-wrap"><table id="result-table"><thead><tr>${allocationColumns().map(([name]) => `<th>${name}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i) => `<tr data-result-row="${i}">${allocationColumns().map(([,get],j) => `<td>${j === 0 ? `<button data-result-select="${i}">${esc(r.id || tr("ui_183"))}</button>` : esc(typeof get(r) === "number" ? new Intl.NumberFormat(locale, {maximumFractionDigits: 6}).format(get(r)) : get(r) ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>${rows.length ? "" : `<p>${tr("ui_184")}</p>`}<h3>${tr("ui_185")}</h3><p>${tr("ui_186")}</p><div id="machine-timeline"></div></div>`;
+  $("#trace-content").innerHTML = `<div class="allocation-results"><div class="result-controls"><label>${tr("ui_171")} <select id="results-view"><option value="replay" ${!S.resultsFinal ? "selected" : ""}>${tr("ui_172")}</option><option value="final" ${S.resultsFinal ? "selected" : ""}>${tr("ui_173")}</option></select></label>${filterHTML}<label>${tr("ui_174")} <input id="result-search" value="${esc(S.resultFilters.search || "")}" type="search"></label><button id="result-reset">${tr("ui_175")}</button><button id="result-csv">${tr("ui_176")}</button></div><p id="result-context">${S.resultsFinal ? tr("ui_177") : `${tr("ui_178")} ${S.cursor}`} · ${time} min · ${rows.length}${tr("ui_179")} ${Object.values(S.resultFilters).some(Boolean) ? tr("ui_180") : tr("ui_181")}${tr("ui_182")}</p><div class="result-table-wrap"><table id="result-table"><thead><tr>${columns.map(([name]) => `<th>${name}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i) => `<tr data-result-row="${i}">${columns.map(([,get],j) => {const value = get(r); return `<td>${j === 0 ? `<button data-result-select="${i}">${esc(r.id || tr("ui_183"))}</button>` : esc(typeof value === "number" ? preciseNumber(value) : value ?? "")}</td>`;}).join("")}</tr>`).join("")}</tbody></table></div>${rows.length ? "" : `<p>${tr("ui_184")}</p>`}<h3>${tr("ui_185")}</h3><p>${tr("ui_186")}</p><div id="machine-timeline"></div></div>`;
   $("#results-view").onchange = e => {S.resultsFinal = e.target.value === "final"; renderTrace();};
   $$('[data-result-filter]').forEach(el => el.onchange = () => {S.resultFilters[el.dataset.resultFilter] = el.value; renderTrace();});
   $("#result-search").oninput = e => {
@@ -1499,7 +1588,7 @@ function renderAllocationResults() {
   });
 }
 
-let replayPersistence=null;
+let replayPersistence=null, replayPersistenceHandle=null;
 // Large immutable snapshots are serialized in short tasks. Cursor writes remain
 // synchronous and small, including while this cancellable snapshot job is pending.
 async function storeLargeReplay(job,result,source) {
@@ -1549,6 +1638,21 @@ function persistReplay() {
     }else{replayPersistence=null;localStorage.removeItem(key);localStorage.removeItem(key+'.position');}
   } catch { /* Source saving remains independent when a large trace exceeds quota. */ }
 }
+function scheduleReplayPersistence() {
+  if (replayPersistenceHandle !== null) return;
+  const complete = () => { replayPersistenceHandle = null; persistReplay(); };
+  replayPersistenceHandle = window.requestIdleCallback
+    ? requestIdleCallback(complete, {timeout: 500})
+    : setTimeout(complete, 0);
+}
+function flushReplayPersistence() {
+  if (replayPersistenceHandle !== null) {
+    if (window.cancelIdleCallback) cancelIdleCallback(replayPersistenceHandle);
+    else clearTimeout(replayPersistenceHandle);
+    replayPersistenceHandle = null;
+  }
+  persistReplay();
+}
 function invalidatePendingValidation() {
   clearTimeout(parseTimer);
   parseTimer = null;
@@ -1556,7 +1660,7 @@ function invalidatePendingValidation() {
 }
 window.addEventListener("pagehide", () => {
   replayPreparationAbort?.abort();
-  persistReplay();
+  flushReplayPersistence();
   // Invalidate deferred producers before terminating current consumers. A
   // persisted BFCache page keeps its UI/source, but performs no hidden work;
   // a later user action uses the new validation generation normally.
@@ -1566,7 +1670,8 @@ window.addEventListener("pagehide", () => {
   dataWorkerStop(DATA.worker);
   browserRuntime?.stop();
 });
-$("#language").onchange = () => {
+$("#language").onchange = async () => {
+  const generation = ++localeChangeGeneration;
   const oldLocale = locale;
   const translateOld = text => {
     const key = Object.keys(translations[oldLocale]).find(k => translations[oldLocale][k] === text);
@@ -1576,7 +1681,18 @@ $("#language").onchange = () => {
   const selected = copy(S.selected), cursor = S.cursor;
   const cmCursor = editor?.getCursor();
   const inspectorOpen = !$("#inspector").hidden;
-  locale = $("#language").value;
+  const nextLocale = $("#language").value;
+  try {
+    await window.loadLocale?.(nextLocale);
+  } catch (error) {
+    if (generation === localeChangeGeneration) {
+      $("#language").value = locale;
+      window.showFactoryLoadFailure?.("locale", error.message);
+    }
+    return;
+  }
+  if (generation !== localeChangeGeneration) return;
+  locale = nextLocale;
   try { localStorage.setItem(localeKey, locale); } catch {}
   if (S.resultFilters.status) S.resultFilters.status = translateOld(S.resultFilters.status);
   translateStatic();

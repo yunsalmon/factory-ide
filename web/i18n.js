@@ -20,4 +20,3 @@ function translateStatic() {
   for (const attr of ['title', 'aria-label']) document.querySelectorAll('[data-i18n-' + attr + ']').forEach(el => el.setAttribute(attr, tr(el.getAttribute('data-i18n-' + attr))));
   document.querySelector('#language').value = locale;
 }
-translateStatic();

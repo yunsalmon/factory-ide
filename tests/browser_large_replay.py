@@ -4,8 +4,11 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 HERE=Path(__file__).resolve().parents[1]
 ROOT=Path(os.environ.get('FACTORY_TEST_ROOT',HERE))
-server=subprocess.Popen([sys.executable,str(ROOT/'server.py'),'--port','0'],cwd=ROOT,stdout=subprocess.PIPE,text=True);atexit.register(server.terminate)
-base=server.stdout.readline().strip().split(' → ')[-1];rows=[]
+base=os.environ.get('FACTORY_TEST_URL')
+if not base:
+ server=subprocess.Popen([sys.executable,str(ROOT/'server.py'),'--port','0'],cwd=ROOT,stdout=subprocess.PIPE,text=True);atexit.register(server.terminate)
+ base=server.stdout.readline().strip().split(' → ')[-1]
+base=base.rstrip('/');rows=[]
 out=Path(sys.argv[1] if len(sys.argv)>1 else '/tmp/large-replay.json')
 with sync_playwright() as p:
  browser=p.chromium.launch()

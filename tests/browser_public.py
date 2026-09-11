@@ -18,7 +18,7 @@ base = sys.argv[1].rstrip('/')
 with urlopen(base + '/demo.json') as response:
     bundle = json.load(response)
 # These assets must be present in the static Docker image, not provided by APIs.
-for asset in ['inventory-projection.js', 'inventory-ui.js', 'allocation-results.js',
+for asset in ['loader.js', 'inventory-projection.js', 'inventory-ui.js', 'allocation-results.js',
               'browser-runtime.js', 'browser-worker.js', 'locales.json',
               'order-projection.js', 'order-ui.js', 'operations.js',
               'scenario-comparison.js', 'scenario-ui.js', 'experiment-core.js', 'experiment-ui.js', 'data-core.js', 'data-ui.js', 'data-worker.js',
@@ -100,6 +100,8 @@ with sync_playwright() as playwright:
         expect(page.locator('html')).to_have_attribute('lang', lang)
         expect(page.locator('#run-button')).to_be_visible()
         expect(page.locator('#reset-button')).to_be_visible()
+        page.locator('#enhance-editor').click()
+        page.wait_for_function('() => Boolean(editor)')
         assert page.locator('.CodeMirror').evaluate('(el) => el.CodeMirror.getOption("readOnly")') is False
         assert page.locator('.CodeMirror').evaluate('(el) => el.CodeMirror.getValue()') == bundle['source']
         expect(page.locator('#demo-version')).to_contain_text('Pyodide 0.27.7')

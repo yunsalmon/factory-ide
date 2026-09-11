@@ -3,8 +3,14 @@
 const WIP = {finalView:false, filters:{}, groupBy:"location", selectedGroup:null, selectedLot:null,page:0,groupPage:0,detailPage:0};
 const WIP_PAGE_SIZE=15,wipFormatters=new Map();
 function wipProjection() { return inventoryProjection(S.result,S.cursor,WIP); }
-function wipValue(value) { if(!wipFormatters.has(locale))wipFormatters.set(locale,new Intl.NumberFormat(locale,{maximumFractionDigits:2}));return value == null ? tr("wip_unknown") : typeof value === "number" ? wipFormatters.get(locale).format(value) : value || "—"; }
 function wipPager(total,page,kind){return total>WIP_PAGE_SIZE?`<nav class="wip-pager" aria-label="${tr('wip_pages')}"><button data-wip-page="${kind}:-1" ${page===0?'disabled':''}>${tr('wip_previous')}</button><span role="status">${tr('wip_page_range',[page*WIP_PAGE_SIZE+1,Math.min(total,(page+1)*WIP_PAGE_SIZE),total])}</span><button data-wip-page="${kind}:1" ${(page+1)*WIP_PAGE_SIZE>=total?'disabled':''}>${tr('wip_next')}</button></nav>`:'';}
+function wipValue(value) {
+  if (value == null) return tr("wip_unknown");
+  if (typeof value !== "number") return value || "—";
+  let formatter = wipFormatters.get(locale);
+  if (!formatter) { formatter = new Intl.NumberFormat(locale,{maximumFractionDigits:2}); wipFormatters.set(locale,formatter); }
+  return formatter.format(value);
+}
 function wipColumns() { return [
   [tr("wip_lot"),r=>r.id], [tr("wip_product"),r=>r.product], [tr("wip_quantity"),r=>r.quantity],
   [tr("wip_process"),r=>r.process], [tr("wip_line"),r=>r.line], [tr("wip_location"),r=>r.location],
@@ -12,18 +18,18 @@ function wipColumns() { return [
   [tr("wip_arrival"),r=>r.arrival], [tr("wip_release"),r=>r.release], [tr("wip_operation"),r=>r.operation],
   [tr("wip_target"),r=>r.target], [tr("wip_wait"),r=>r.wait]
 ]; }
-function highlightWipGraph() {
+function highlightWipGraph(projection = null) {
   $$(".wip-highlight").forEach(el=>el.classList.remove("wip-highlight"));
   if (S.tab !== "wip" || !S.result) return;
-  const projection=wipProjection();
+  projection ||= wipProjection();
   const selected=WIP.selectedLot ? projection.rows.filter(r=>r.id===WIP.selectedLot) : projection.groups.find(g=>g.key===WIP.selectedGroup)?.rows || [];
   const nodes=new Set(selected.flatMap(r=>[r.node,r.physical]));
   const routes=new Set(selected.filter(r=>r.status==="moving").map(r=>r.route));
   $$("[data-node], [data-terminal]").forEach(el=>el.classList.toggle("wip-highlight",nodes.has(el.dataset.node||el.dataset.terminal)));
   $$("[data-route]").forEach(el=>el.classList.toggle("wip-highlight",routes.has(el.dataset.route)));
 }
-function renderInventory() {
-  const p=wipProjection(), columns=wipColumns();
+function renderInventory(projection = null) {
+  const p=projection || wipProjection(), columns=wipColumns();
   WIP.page=Math.min(WIP.page,Math.max(0,Math.ceil(p.rows.length/WIP_PAGE_SIZE)-1));
   WIP.groupPage=Math.min(WIP.groupPage,Math.max(0,Math.ceil(p.groups.length/WIP_PAGE_SIZE)-1));
   const start=WIP.page*WIP_PAGE_SIZE,groupStart=WIP.groupPage*WIP_PAGE_SIZE;
@@ -49,8 +55,8 @@ function renderInventory() {
   $("#wip-search").oninput=e=>{const start=e.target.selectionStart;WIP.filters.search=e.target.value;WIP.page=0;WIP.groupPage=0;renderInventory();$("#wip-search").focus();try{$("#wip-search").setSelectionRange(start,start);}catch{}};
   $("#wip-reset").onclick=()=>{WIP.filters={};WIP.selectedLot=null;WIP.selectedGroup=null;WIP.page=0;WIP.groupPage=0;WIP.detailPage=0;renderInventory();};
   $("#wip-csv").onclick=()=>download("factory_wip.csv",inventoryCSV(p,columns,{[tr("wip_cursor")]:p.cursor,[tr("wip_time")]:p.time,[tr("wip_view")]:tr(WIP.finalView?"wip_final":"wip_replay")}),"text/csv;charset=utf-8");
-  $$("[data-wip-group]").forEach(el=>el.onclick=()=>{pause();WIP.selectedGroup=p.groups[Number(el.dataset.wipGroup)].key;WIP.selectedLot=null;renderInventory();$("#graph-viewport").scrollIntoView({block:"nearest"});});
-  $$("[data-wip-lot]").forEach(el=>el.onclick=()=>{pause();WIP.selectedLot=p.rows[Number(el.dataset.wipLot)].id;WIP.selectedGroup=null;renderInventory();$("#wip-detail").scrollIntoView({block:"nearest"});});
+  $$("[data-wip-group]").forEach(el=>el.onclick=()=>{pause();WIP.selectedGroup=p.groups[Number(el.dataset.wipGroup)].key;WIP.selectedLot=null;renderInventory(p);$("#graph-viewport").scrollIntoView({block:"nearest"});});
+  $$("[data-wip-lot]").forEach(el=>el.onclick=()=>{pause();WIP.selectedLot=p.rows[Number(el.dataset.wipLot)].id;WIP.selectedGroup=null;renderInventory(p);$("#wip-detail").scrollIntoView({block:"nearest"});});
   const row=p.rows.find(r=>r.id===WIP.selectedLot);
   const selectedRows=row?[row]:p.groups.find(g=>g.key===WIP.selectedGroup)?.rows||[];
   WIP.detailPage=Math.min(WIP.detailPage,Math.max(0,Math.ceil(selectedRows.length/WIP_PAGE_SIZE)-1));
@@ -59,6 +65,6 @@ function renderInventory() {
     $("#wip-detail").innerHTML=`<h3>${tr("wip_detail")}</h3>${wipPager(selectedRows.length,WIP.detailPage,'detailPage')}${detailRows.map((r,i)=>`<details data-wip-detail="${i}" ${row?"open":""}><summary>${esc(r.id)} · ${esc(r.product)} · ${esc(r.location)}</summary><div></div></details>`).join("")}`;
     $$('[data-wip-detail]').forEach(el=>{const fill=()=>{if(!el.open||el.dataset.loaded)return;el.dataset.loaded='true';const r=detailRows[Number(el.dataset.wipDetail)];el.querySelector('div').innerHTML=`<p>${tr("wip_physical")}: ${esc(r.physical)} · ${tr("wip_location_arrival")}: ${wipValue(r.locationArrival)} min</p><h4>${tr("wip_history")}</h4><ol>${r.history.map(index=>{const e=S.result.events[index];return `<li>${wipValue(e.time)} min · ${esc(kinds[e.kind]||e.kind)} · ${esc(e.lot?.location||'')} ${e.reason?`· ${esc(localized(e.reason,e.reason_message))}`:""}</li>`;}).join("")}</ol>${r.decision!==null?`<button data-wip-reason="${r.decision}">${tr("wip_reason")}</button>`:`<p>${tr("wip_no_reason")}</p>`}`;el.querySelector('[data-wip-reason]')?.addEventListener('click',()=>{WIP.finalView=false;pause();S.comparison=r.decision;seek(r.decision+1,true);selectTab('allocations');});};el.ontoggle=fill;fill();});
   }
-  $$('[data-wip-page]').forEach(el=>el.onclick=()=>{const [key,step]=el.dataset.wipPage.split(':');WIP[key]+=Number(step);renderInventory();const next=document.querySelector(`[data-wip-page="${key}:${step}"]`);(next?.disabled?document.querySelector(`[data-wip-page="${key}:${-Number(step)}"]`):next)?.focus({preventScroll:true});});
-  highlightWipGraph();
+  $$('[data-wip-page]').forEach(el=>el.onclick=()=>{const [key,step]=el.dataset.wipPage.split(':');WIP[key]+=Number(step);renderInventory(p);const next=document.querySelector(`[data-wip-page="${key}:${step}"]`);(next?.disabled?document.querySelector(`[data-wip-page="${key}:${-Number(step)}"]`):next)?.focus({preventScroll:true});});
+  highlightWipGraph(p);
 }
