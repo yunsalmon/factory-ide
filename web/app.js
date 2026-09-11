@@ -1361,7 +1361,10 @@ function canRestorePublicReplay(saved, source) {
     if (result.initial_state !== undefined && !snapshots(result.initial_state)) return false;
     for (const event of result.events) {
       if (!record(event) || !text(event.kind) || !snapshots(event.state_changes) ||
-          (event.lot != null && !lot(event.lot)) || (event.kind === "setup_plan" && !lot(event.lot))) return false;
+          (event.lot != null && !lot(event.lot)) || (event.kind !== "machine_state" && !lot(event.lot))) return false;
+      for (const key of ["candidates", "checks"]) {
+        if (event[key] !== undefined && (!Array.isArray(event[key]) || !event[key].every(record))) return false;
+      }
     }
     const routes = new Set(model.routes.map(route => route.id));
     const destinations = new Set(["OUTPUT", ...model.machines.map(m => m.id)]);

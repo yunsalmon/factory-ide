@@ -77,6 +77,9 @@ with sync_playwright() as p:
             malformed.append(dict(fixture, result=result))
         broken_event = dict(fixture['result']['events'][0], state_changes={'lots': {'broken': None}, 'machines': {}})
         malformed.append(dict(fixture, result=dict(fixture['result'], events=[broken_event])))
+        for replacement in [{'lot': None}, {'checks': [None]}]:
+            events = [dict(fixture['result']['events'][0], **replacement), *fixture['result']['events'][1:]]
+            malformed.append(dict(fixture, result=dict(fixture['result'], events=events)))
         for source, replay in [
             (fixture['source'], None),
             (fixture['source'], dict(fixture, source='wrong source')),
