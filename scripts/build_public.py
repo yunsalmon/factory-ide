@@ -50,11 +50,14 @@ def build(output, revision, runtime_dir=None):
     (output / 'healthz').write_text('ok\n')
     (output / 'locales.js').write_text('const translations = ' + (ROOT / 'web/locales.json').read_text() + ';\n')
     html = (output / 'index.html').read_text().replace('<html lang="ko">', '<html lang="ko" data-mode="public">')
+    # Discover the dashboard payload while deferred application scripts load.
+    # This is the same-origin fetch used by boot(), not a second data source.
+    html = html.replace('</head>', '<link rel="preload" href="/demo.json" as="fetch" crossorigin="anonymous" />\n  </head>')
     for before, after in [('local','public_title'),('ui_211','public_runtime'),('ui_212','public_runtime_detail'),('ui_241','public_storage'),('live_trace','public_trace'),('ui_231','public_help'),('ui_12','public_source'),('ui_227','public_shortcut')]:
         html = html.replace(f'data-i18n="{before}"', f'data-i18n="{after}"')
     start, end = html.index('      <p>', html.index('<dialog')), html.index('    </dialog>')
     html = html[:start] + '<p data-i18n="public_scope"></p><p data-i18n="public_help"></p><a href="/install.html" data-i18n="public_install"></a>\n' + html[end:]
-    banner = '<section class="public-notice"><b data-i18n="public_title"></b><p data-i18n="public_scope"></p><p data-i18n="public_limits"></p><a href="/install.html" data-i18n="public_install"></a><details><summary>Build / runtime / trace</summary><code id="demo-version"></code></details></section>'
+    banner = '<section class="public-notice"><p id="startup-progress" role="status" data-i18n="public_restoring">저장된 프로젝트와 예제 기록을 불러오는 중…</p><b data-i18n="public_title"></b><p data-i18n="public_scope"></p><p data-i18n="public_limits"></p><a href="/install.html" data-i18n="public_install"></a><details><summary>Build / runtime / trace</summary><code id="demo-version"></code></details></section>'
     html = html.replace('<main>', '<main>' + banner)
     (output / 'index.html').write_text(html)
     with (output / 'style.css').open('a') as f:

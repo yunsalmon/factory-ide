@@ -533,11 +533,11 @@ function renderPlayback() {
     $("#" + id).disabled = !count;
   $("#event-count").textContent = count;
 }
-function selectTab(tab) {
+function selectTab(tab, render = true) {
   S.tab = tab;
-  renderGraph();
+  if (render) renderGraph();
   $$("[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-  renderTrace();
+  if (render) renderTrace();
 }
 function renderTrace() {
   const container = $("#trace-content"),
@@ -1337,18 +1337,16 @@ async function boot() {
       S.demoVersion = data.version;
       let restoredPublicReplay = false;
       let source = data.source;
-      try { source = localStorage.getItem("factory-studio.public.source.v1") || source; } catch {}
+      try { source = localStorage.getItem("factory-studio.public.source.v1") ?? source; } catch {}
       setSource(source);
       S.model = data.result.model; S.result = source === data.source ? copy(data.result) : null; S.valid = source === data.source;
       S.warnings = data.result.warnings; S.warningMessages = data.result.warning_messages;
       const runtime = data.version.browser_runtime;
       $("#demo-version").textContent = `${data.version.source_revision} · trace v${data.result.schema_version} · Pyodide ${runtime.pyodide} · Python ${runtime.python} · SimPy ${runtime.simpy} · ${data.version.trace_sha256}`;
-      if (source !== data.source) {
-        await applyCode(true);
-      }
       try {
         const saved = JSON.parse(localStorage.getItem("factory-studio.public.replay.v1"));
-        if (saved?.source === source && saved.result?.schema_version === 2) {
+        if (saved?.source === source && saved.result?.schema_version === 2 &&
+            saved.result.model && Array.isArray(saved.result.events)) {
           S.model = saved.result.model; S.result = saved.result; S.valid = true;
           S.cursor = Number.isInteger(saved.cursor) && saved.cursor >= 0 && saved.cursor <= S.result.events.length ? saved.cursor : 1;
           S.tab = saved.tab || "events";
@@ -1357,10 +1355,18 @@ async function boot() {
           restoredPublicReplay = true;
         }
       } catch {}
+      // A matching replay already contains its model and execution metadata.
+      // Reviewing it must not download Python or re-execute the saved source.
+      // Edits and Run still validate through the isolated worker as usual.
+      if (source !== data.source && !restoredPublicReplay) {
+        await applyCode(true);
+      }
       $("#project-name").textContent = S.model.name;
-      diagnostics(); renderTree(); renderGraph();
+      diagnostics(); renderTree();
+      // Select the saved tab before seek paints the dashboard once. Otherwise
+      // startup renders the graph three times and the saved Results table twice.
+      selectTab(S.result ? S.tab : "console", false);
       seek(S.result ? (restoredPublicReplay ? S.cursor : 1) : 0);
-      selectTab(S.result ? S.tab : "console");
       status({code: "public_ready"});
       return;
     }
@@ -1389,6 +1395,9 @@ async function boot() {
   } catch (e) {
     status({code: "ui_161"});
     toast(e.detail || e.message);
+  } finally {
+    const progress = $("#startup-progress");
+    if (progress) progress.hidden = true;
   }
 }
 boot();
