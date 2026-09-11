@@ -1460,3 +1460,7 @@ dialog li {
 .graph-evidence-actions button { white-space: normal; }
 .machine-node.blocked .node-bg { stroke: #a65b2a; stroke-width: 2; stroke-dasharray: 4 2; }
 .machine-node.maintenance .node-bg, .machine-node.down .node-bg, .machine-node.offshift .node-bg { stroke: #80677a; stroke-dasharray: 2 2; }
+
+.editor-keyboard-help { padding: 8px 12px; border-bottom: 1px solid #d5dfd2; }
+.editor-keyboard-help p { margin: 0 0 6px; color: #344d40; font-size: 12px; line-height: 1.5; }
+.editor-keyboard-help button { font-size: 12px; }

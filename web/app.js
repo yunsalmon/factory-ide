@@ -1094,12 +1094,36 @@ $("#code").addEventListener("input", () => {
 $("#code").addEventListener("scroll", () => ($("#line-numbers").scrollTop = $("#code").scrollTop));
 $("#code").addEventListener("click", updateEditor);
 $("#code").addEventListener("keyup", updateEditor);
+// Textarea fallback mirrors the explicit CodeMirror indentation shortcuts.
+// Tab is deliberately absent: it always navigates, including with a selection.
+function indentPlainEditor(el, more) {
+  const source = el.value, anchor = el.selectionStart, head = el.selectionEnd;
+  const start = anchor === 0 ? 0 : source.lastIndexOf("\n", anchor - 1) + 1;
+  const endAnchor = head > anchor && source[head - 1] === "\n" ? head - 1 : head;
+  const nextNewline = source.indexOf("\n", endAnchor);
+  const end = nextNewline < 0 ? source.length : nextNewline;
+  const block = source.slice(start, end);
+  const lines = block.split("\n");
+  const changed = lines.map(line => more ? "    " + line : line.replace(/^(?: {1,4}|\t)/, "")).join("\n");
+  if (changed === block) return;
+  const firstDelta = changed.split("\n")[0].length - lines[0].length;
+  el.setRangeText(changed, start, end, "select");
+  if (anchor === head) {
+    const caret = Math.max(start, anchor + firstDelta);
+    el.setSelectionRange(caret, caret);
+  }
+  el.dispatchEvent(new Event("input", {bubbles:true}));
+}
+$("#editor-skip-results").onclick = () => {
+  pause();
+  const target = document.querySelector("[data-tab]");
+  target?.focus();
+  target?.scrollIntoView({block:"nearest"});
+};
 $("#code").addEventListener("keydown", (e) => {
-  if (e.key === "Tab") {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && ["BracketLeft", "BracketRight"].includes(e.code)) {
     e.preventDefault();
-    const el = e.target;
-    el.setRangeText("    ", el.selectionStart, el.selectionEnd, "end");
-    el.dispatchEvent(new Event("input"));
+    indentPlainEditor(e.target, e.code === "BracketRight");
   }
 });
 $("#apply-code").onclick = () => applyCode();
@@ -1198,6 +1222,7 @@ $("#file-input").onchange = async (e) => {
   }
 };
 window.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented) return; // CodeMirror already handled its scoped command.
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
     save();
@@ -1229,12 +1254,21 @@ if (window.CodeMirror) {
       "Cmd-S": save,
       "Ctrl-/": "toggleComment",
       "Cmd-/": "toggleComment",
-      Tab: (cm) =>
-        cm.somethingSelected() ? cm.indentSelection("add") : cm.replaceSelection("    "),
-      "Shift-Tab": (cm) => cm.indentSelection("subtract"),
+      // false stops CodeMirror keymap fallthrough while preserving the browser's
+      // native focus navigation. Removing these entries would restore its trap.
+      Tab: false,
+      "Shift-Tab": false,
+      "Ctrl-]": "indentMore",
+      "Cmd-]": "indentMore",
+      "Ctrl-[": "indentLess",
+      "Cmd-[": "indentLess",
       "Ctrl-Space": (cm) =>
         cm.showHint({
           completeSingle: false,
+          extraKeys: {
+            Tab: (_cm, completion) => { completion.close(); return CodeMirror.Pass; },
+            "Shift-Tab": (_cm, completion) => { completion.close(); return CodeMirror.Pass; },
+          },
           hint: (instance) => {
             const pos = instance.getCursor(),
               token = instance.getTokenAt(pos),
@@ -1282,6 +1316,7 @@ if (window.CodeMirror) {
   });
   editor.getWrapperElement().setAttribute("aria-label", tr("ui_158"));
   editor.getInputField().setAttribute("aria-label", tr("ui_159"));
+  editor.getInputField().setAttribute("aria-describedby", "editor-keyboard-help");
   $(".code-wrap").classList.add("enhanced");
   editor.on("change", () => {
     if (settingEditor) return;
