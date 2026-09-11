@@ -1,17 +1,58 @@
 "use strict";
 
+// Resource accounting uses roles rather than URLs because the interactive
+// editor and experiment lanes intentionally share the same Worker program.
+// Audits should pair this ledger with browser Worker-target counts.
+const FACTORY_WORKER_RESOURCE_CONTRACT = Object.freeze({
+  version: 1,
+  interactive: Object.freeze({maximum: 1, settled: 1, workerName: "factory-interactive-runtime"}),
+  experiment: Object.freeze({maximum: 2, settled: 0, workerName: "factory-experiment-runtime"}),
+  data: Object.freeze({maximum: 1, settled: 0, workerName: "factory-data-import"}),
+});
+const factoryWorkerResources = (() => {
+  const live = {interactive: new Set(), experiment: new Set(), data: new Set()};
+  let serial = 0;
+  const snapshot = () => Object.freeze({
+    contractVersion: FACTORY_WORKER_RESOURCE_CONTRACT.version,
+    interactive: live.interactive.size,
+    experiment: live.experiment.size,
+    data: live.data.size,
+    total: live.interactive.size + live.experiment.size + live.data.size,
+  });
+  return Object.freeze({
+    allocate(runtime) {
+      const rule = FACTORY_WORKER_RESOURCE_CONTRACT[runtime.role];
+      if (!rule || live[runtime.role].has(runtime) || live[runtime.role].size >= rule.maximum) {
+        throw Object.assign(new Error(`Worker resource limit exceeded for ${runtime.role}`), {code: "browser_resource_limit"});
+      }
+      runtime.resourceId = ++serial;
+      live[runtime.role].add(runtime);
+    },
+    release(runtime) {
+      if (!runtime || !Object.hasOwn(live, runtime.role)) return false;
+      return live[runtime.role].delete(runtime);
+    },
+    snapshot,
+  });
+})();
+
 class BrowserPythonRuntime {
-  constructor({workerURL = "/browser-worker.js", initTimeout = 180_000, runTimeout = 8_000, onState = () => {}} = {}) {
+  constructor({workerURL = "/browser-worker.js", initTimeout = 180_000, runTimeout = 8_000, onState = () => {}, role = "interactive"} = {}) {
+    if (!Object.hasOwn(FACTORY_WORKER_RESOURCE_CONTRACT, role)) throw new TypeError(`Unknown browser Worker role: ${role}`);
     this.workerURL = workerURL;
     this.initTimeout = initTimeout;
     this.runTimeout = runTimeout;
     this.onState = onState;
+    this.role = role;
     this.worker = null;
     this.ready = null;
     this.pending = new Map();
     this.serial = 0;
     this.state = "idle";
     this.runtime = null;
+    this.resourceId = null;
+    this.idleReclaims = 0;
+    this.lastIdleReclaim = null;
   }
 
   setState(state) {
@@ -20,8 +61,21 @@ class BrowserPythonRuntime {
   }
 
   createWorker() {
-    this.worker = new Worker(this.workerURL);
-    const worker = this.worker;
+    // One runtime owns at most one physical Worker. Returning the existing
+    // initialization promise keeps direct/reentrant callers on that owner and
+    // prevents a Worker reference from being overwritten outside the ledger.
+    if (this.worker) return this.ready;
+    factoryWorkerResources.allocate(this);
+    const rule = FACTORY_WORKER_RESOURCE_CONTRACT[this.role];
+    let worker;
+    try {
+      worker = new Worker(this.workerURL, {name: `${rule.workerName}-${this.resourceId}`});
+      this.worker = worker;
+    } catch (error) {
+      factoryWorkerResources.release(this);
+      this.resourceId = null;
+      throw error;
+    }
     this.worker.addEventListener("message", (event) => this.receive(event.data));
     this.worker.addEventListener("error", (event) => {
       if (this.worker !== worker) return;
@@ -51,6 +105,10 @@ class BrowserPythonRuntime {
     if (!pending) return;
     clearTimeout(pending.timer);
     this.pending.delete(message.id);
+    if (message.resources?.idle_reclaimed) {
+      this.idleReclaims += 1;
+      this.lastIdleReclaim = Object.freeze({...message.resources});
+    }
     if (message.type === "error") {
       const error = Object.assign(new Error(message.error || "Browser runtime error"), message);
       pending.reject(error);
@@ -137,8 +195,20 @@ class BrowserPythonRuntime {
     this.worker = null;
     this.ready = null;
     this.runtime = null;
+    factoryWorkerResources.release(this);
+    this.resourceId = null;
     worker?.terminate();
     this.failAll(error);
+  }
+
+  resourceSnapshot() {
+    return Object.freeze({
+      ...factoryWorkerResources.snapshot(),
+      role: this.role,
+      state: this.state,
+      idleReclaims: this.idleReclaims,
+      lastIdleReclaim: this.lastIdleReclaim,
+    });
   }
 
   failAll(error) {
@@ -151,3 +221,5 @@ class BrowserPythonRuntime {
 }
 
 window.BrowserPythonRuntime = BrowserPythonRuntime;
+window.FACTORY_WORKER_RESOURCE_CONTRACT = FACTORY_WORKER_RESOURCE_CONTRACT;
+window.factoryWorkerResources = factoryWorkerResources;

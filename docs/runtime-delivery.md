@@ -1,5 +1,9 @@
 # Cold runtime delivery and release gate
 
+The retained runtime and task-Worker limits are specified in
+[`worker-resources.md`](worker-resources.md). Delivery measurements must count
+the allowed interactive target separately from experiment and data Workers.
+
 The issue33 baseline measured a3,137,600-byte gzip WASM response with
 `CF-Cache-Status: DYNAMIC`:68,345ms body transfer versus556ms TTFB,
 74,293ms edit→ready. Five small Python engine runs took approximately108–116ms.

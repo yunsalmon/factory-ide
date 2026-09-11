@@ -1,5 +1,6 @@
 "use strict";
 const EXPERIMENTS={initiation:0,starting:false,abortStart:false,items:[],name:'Experiment',notes:'',seeds:'1,2,3',concurrency:1,runner:null,current:null,error:null,baseline:0,candidate:0};
+function cancelExperiment(){EXPERIMENTS.abortStart=true;EXPERIMENTS.initiation++;EXPERIMENTS.runner?.cancel();}
 function experimentNumber(v){return v===null||v===undefined?tr('sc_unavailable'):new Intl.NumberFormat(locale,{maximumFractionDigits:4}).format(v);}
 async function startExperiment(){
  if(EXPERIMENTS.starting||EXPERIMENTS.runner?.active)return;
@@ -26,7 +27,7 @@ function renderExperiments(){
  ${comparison&&scenarioCanonical([...new Set(items[EXPERIMENTS.baseline].runs.filter(r=>r.status==='success').map(r=>scenarioCanonical(r.runtime)))].sort())!==scenarioCanonical([...new Set(items[EXPERIMENTS.candidate].runs.filter(r=>r.status==='success').map(r=>scenarioCanonical(r.runtime)))].sort())?`<p role="status">${tr('sc_runtime_warning')}</p>`:''}
  ${comparison?`<div class="ex-scroll" tabindex="0" role="region" aria-label="${tr('sc_deltas')}"><table id="ex-comparison"><caption>${tr('sc_deltas')}</caption><thead><tr><th>${tr('sc_kpi')}</th><th>${tr('sc_baseline')}</th><th>${tr('sc_candidate')}</th><th>${tr('sc_delta')}</th></tr></thead><tbody>${comparison.map(r=>`<tr><th>${esc(scenarioLabel(r.key))}</th><td>${cell(r.baseline?.mean)} (${r.baseline?.n??0})</td><td>${cell(r.candidate?.mean)} (${r.candidate?.n??0})</td><td>${cell(r.delta)}</td></tr>`).join('')}</tbody></table></div>`:''}</section>`;
  for(const key of ['name','notes','seeds'])$('#ex-'+key).oninput=e=>EXPERIMENTS[key]=e.target.value;$('#ex-concurrency').onchange=e=>EXPERIMENTS.concurrency=Number(e.target.value);
- $('#ex-run').onclick=startExperiment;$('#ex-cancel').onclick=()=>{EXPERIMENTS.abortStart=true;EXPERIMENTS.initiation++;EXPERIMENTS.runner?.cancel();};
+ $('#ex-run').onclick=startExperiment;$('#ex-cancel').onclick=cancelExperiment;
  $('#ex-export').onclick=async()=>{try{download('factory_experiments.json',JSON.stringify(await experimentExport(items),null,2),'application/json');}catch(e){EXPERIMENTS.error=e.experimentCode||'ex_invalid';renderExperiments();}};
  $('#ex-import').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;if(f.size>EXP_LIMITS.artifact)experimentFail('ex_limit');EXPERIMENTS.items=await experimentRestore(JSON.parse(await f.text()));EXPERIMENTS.baseline=0;EXPERIMENTS.candidate=EXPERIMENTS.items.length-1;EXPERIMENTS.error=null;}catch(e){EXPERIMENTS.error=e.experimentCode||'ex_invalid';}renderExperiments();};
  $$('[data-ex-replay]').forEach(el=>el.onclick=()=>replayExperiment(Number(el.dataset.exReplay)));

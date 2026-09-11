@@ -46,11 +46,23 @@ class BrowserRuntimeTests(unittest.TestCase):
     def test_worker_uses_static_runtime_and_no_execution_api(self):
         worker = (ROOT / 'web' / 'browser-worker.js').read_text()
         controller = (ROOT / 'web' / 'browser-runtime.js').read_text()
+        app = (ROOT / 'web' / 'app.js').read_text()
+        data_ui = (ROOT / 'web' / 'data-ui.js').read_text()
         self.assertIn('Factory(model', worker)
         self.assertIn('self.fetch = () => Promise.reject', worker)
         self.assertIn('self.postMessage = () =>', worker)
         self.assertNotIn('/api/', worker + controller)
         self.assertIn('worker?.terminate()', controller)
+        self.assertIn('FACTORY_WORKER_RESOURCE_CONTRACT', controller)
+        self.assertIn('factoryWorkerResources.release(this)', controller)
+        self.assertIn('reclaimRequestMemory()', worker)
+        self.assertIn('pyodide.globals.delete(name)', worker)
+        self.assertIn('let requestQueue = Promise.resolve()', worker)
+        self.assertIn('requestQueue = requestQueue.then(', worker)
+        self.assertIn('message.resources?.idle_reclaimed', controller)
+        self.assertIn('generation !== validationGeneration', app)
+        self.assertIn('invalidateDataWork();\n  invalidatePendingValidation();\n  cancelExperiment();', app)
+        self.assertIn('function invalidateDataWork(){DATA.serial++', data_ui)
 
     def test_runtime_manifest_records_every_download(self):
         cache = ROOT / '.cache' / 'browser-runtime' / 'runtime-manifest.json'

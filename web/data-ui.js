@@ -3,18 +3,26 @@
 const DATA={table:'machines',format:'csv',file:null,text:null,headers:[],mapping:{},options:{unit:'minutes',timezone:'Z',origin:''},worker:null,serial:0,busy:false,phase:null,pending:null,diagnostics:[],observations:null,message:null,windowStart:0,windowEnd:null,final:true};
 function dataValue(value){return value==null?tr('data_unknown'):typeof value==='number'?new Intl.NumberFormat(locale,{maximumFractionDigits:4}).format(value):value;}
 function invalidateDataPreview(){DATA.pending=null;DATA.diagnostics=[];DATA.message=null;}
-function cancelDataImport(){DATA.serial++;DATA.worker?.terminate();DATA.worker=null;DATA.busy=false;DATA.pending=null;DATA.phase=null;DATA.message={code:'data_cancelled'};if(S.tab==='data')renderDataPanel();}
+function invalidateDataWork(){DATA.serial++;DATA.busy=false;DATA.phase=null;}
+function dataWorkerStop(worker){if(!worker)return;worker.terminate();factoryWorkerResources.release(worker.factoryResource);if(DATA.worker===worker)DATA.worker=null;}
+function dataWorkerCreate(){
+ const owner={role:'data',resourceId:null};factoryWorkerResources.allocate(owner);let worker;
+ try{worker=new Worker('/data-worker.js',{name:`${FACTORY_WORKER_RESOURCE_CONTRACT.data.workerName}-${owner.resourceId}`});}
+ catch(error){factoryWorkerResources.release(owner);throw error;}
+ worker.factoryResource=owner;return worker;
+}
+function cancelDataImport(){DATA.serial++;dataWorkerStop(DATA.worker);DATA.busy=false;DATA.pending=null;DATA.phase=null;DATA.message={code:'data_cancelled'};if(S.tab==='data')renderDataPanel();}
 function runDataWorker(preview=false){
- if(DATA.text==null)return;DATA.worker?.terminate();const id=++DATA.serial;DATA.busy=true;DATA.phase={phase:'parsing',rows:0};invalidateDataPreview();
- const revision=S.revision,worker=new Worker('/data-worker.js');DATA.worker=worker;
+ if(DATA.text==null)return;dataWorkerStop(DATA.worker);const id=++DATA.serial;DATA.busy=true;DATA.phase={phase:'parsing',rows:0};invalidateDataPreview();
+ const revision=S.revision;let worker;try{worker=dataWorkerCreate();}catch{DATA.busy=false;DATA.phase=null;DATA.message={code:'data_worker_error'};if(S.tab==='data')renderDataPanel();return;}DATA.worker=worker;
  worker.onmessage=event=>{if(id!==DATA.serial)return;const message=event.data;if(message.progress){DATA.phase=message.progress;if(S.tab==='data')renderDataPanel();return;}
-  worker.terminate();DATA.worker=null;DATA.busy=false;DATA.phase=null;const result=message.result;
+  dataWorkerStop(worker);DATA.busy=false;DATA.phase=null;const result=message.result;
   if(result.preview){DATA.headers=result.headers;DATA.mapping=Object.fromEntries([...DATA_FIELDS[DATA.table],'extra_json','time_unit','schema_version'].map(field=>[field,result.headers.includes(field)?field:'']));DATA.message={code:'data_mapping_ready',args:[result.summary.rows]};}
   else if(result.ok){DATA.pending={...result,revision};DATA.message={code:'data_dry_ready'};}
   else{DATA.diagnostics=result.diagnostics;DATA.message={code:'data_invalid'};}
   if(S.tab==='data')renderDataPanel();
  };
- worker.onerror=()=>{if(id!==DATA.serial)return;worker.terminate();DATA.worker=null;DATA.busy=false;DATA.phase=null;DATA.message={code:'data_worker_error'};if(S.tab==='data')renderDataPanel();};
+ worker.onerror=()=>{if(id!==DATA.serial)return;dataWorkerStop(worker);DATA.busy=false;DATA.phase=null;DATA.message={code:'data_worker_error'};if(S.tab==='data')renderDataPanel();};
  worker.postMessage({id,request:{text:DATA.text,format:DATA.format,table:DATA.table,baseModel:copy(S.model),mapping:DATA.mapping,options:{...DATA.options,origin:DATA.options.origin||S.model.time_origin},preview}});
  if(S.tab==='data')renderDataPanel();
 }

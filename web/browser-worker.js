@@ -69,7 +69,7 @@ async function initialize() {
   pyodide.FS.writeFile("/factory_runtime/disruptions.py", disruptions);
   pyodide.FS.writeFile("/factory_runtime/operation_metrics.py", metrics);
   await pyodide.runPythonAsync(`
-import builtins, contextlib, io, json, platform, sys, traceback
+import builtins, contextlib, gc, io, json, platform, sys, traceback
 sys.path.insert(0, "/factory_runtime")
 import simpy
 from engine import Factory
@@ -109,6 +109,9 @@ def _line_for(error):
         if frame.filename == "factory_model.py":
             return frame.lineno
     return None
+
+def _reclaim_request():
+    return gc.collect()
 
 def _execute(source):
     model, _, _ = parse(source)
@@ -179,7 +182,19 @@ def _handle(operation, source, seed=None, updated_model=None):
   return runtime;
 }
 
+function reclaimRequestMemory() {
+  const names = ["__factory_operation", "__factory_source", "__factory_seed", "__factory_model_json"];
+  for (const name of names) pyodide.globals.delete(name);
+  return {
+    idle_reclaimed: true,
+    globals_cleared: names.length,
+    python_objects_collected: pyodide.runPython("_reclaim_request()"),
+  };
+}
+
 async function handle(message) {
+  let outgoing;
+  let resources;
   try {
     const details = await initialize();
     if (message.type === "init") {
@@ -195,13 +210,32 @@ async function handle(message) {
     pyodide.globals.set("__factory_model_json", JSON.stringify(message.model ?? null));
     const response = JSON.parse(await pyodide.runPythonAsync("_handle(__factory_operation, __factory_source, __factory_seed, json.loads(__factory_model_json))"));
     if (!response.ok) {
-      send({type: "error", id: message.id, ...response});
-      return;
+      outgoing = {type: "error", id: message.id, ...response};
+    } else {
+      outgoing = {type: "result", id: message.id, payload: response.payload};
     }
-    send({type: "result", id: message.id, payload: response.payload});
   } catch (error) {
-    send({type: "error", id: message.id, ...(!runtime ? {code: "browser_init_error"} : {}), error: error?.message || String(error), traceback: error?.stack || ""});
+    outgoing = {type: "error", id: message.id, ...(!runtime ? {code: "browser_init_error"} : {}), error: error?.message || String(error), traceback: error?.stack || ""};
+  } finally {
+    if (message.type !== "init" && pyodide) {
+      try {
+        resources = reclaimRequestMemory();
+      } catch (error) {
+        outgoing = {type: "error", id: message.id, code: "browser_reclaim_error", error: error?.message || String(error), traceback: error?.stack || ""};
+      }
+    }
   }
+  send({...outgoing, ...(resources ? {resources} : {})});
 }
 
-self.addEventListener("message", (event) => handle(event.data));
+// Pyodide exposes one interpreter and one globals mapping per Worker. Keep a
+// single request queue so bridge globals remain owned by one request through
+// execution and reclamation. The rejection arm also keeps a surprising send
+// failure from poisoning later work.
+let requestQueue = Promise.resolve();
+self.addEventListener("message", (event) => {
+  requestQueue = requestQueue.then(
+    () => handle(event.data),
+    () => handle(event.data),
+  );
+});
