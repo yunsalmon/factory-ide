@@ -78,17 +78,21 @@ with sync_playwright() as playwright:
             # gets a visually and audibly distinct fallback rather than a blank.
             states = page.evaluate('''() => {
               const values=["waiting","reserved","moving","processing","completed","release_pending",
-                "setup","down","maintenance","blocked","starved","offshift","resource_wait","idle","future_hold"];
+                "setup","down","maintenance","blocked","starved","offshift","resource_wait","idle",
+                "future_hold","constructor","__proto__","toString"];
               const host=document.createElement("div");host.innerHTML=values.map(traceStateBadge).join("");
               return [...host.children].map((el,i)=>({state:values[i],text:el.textContent,
                 known:el.dataset.stateKnown,label:el.getAttribute("aria-label"),className:el.className}));
             }''')
             assert all(item['text'] and item['text'] != 'undefined' for item in states)
-            assert all(item['known'] == 'true' for item in states[:-1])
-            unknown = states[-1]
-            assert unknown['known'] == 'false' and 'trace-state-unknown' in unknown['className']
-            assert unknown['text'] == page.evaluate('tr("allocation_state_unknown")')
-            assert 'future_hold' in unknown['label']
+            assert all(item['known'] == 'true' for item in states[:-4])
+            expected_unknown = page.evaluate('tr("allocation_state_unknown")')
+            for unknown in states[-4:]:
+                assert unknown['known'] == 'false' and 'trace-state-unknown' in unknown['className']
+                assert unknown['text'] == expected_unknown
+                assert unknown['state'] in unknown['label']
+            assert page.evaluate('''() => ["constructor","__proto__","toString"].every(kind =>
+              tracePlacementLabel({placement:{kind,id:"X"}}) === tr("allocation_placement_unknown") + " · X")''')
             assert 'undefined' not in page.locator('#allocation-detail').inner_text().lower()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             assert not errors, errors

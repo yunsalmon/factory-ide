@@ -82,7 +82,8 @@ const traceStateKeys = Object.freeze({
   idle: "ops_state_idle",
 });
 function traceStateLabel(state) {
-  return tr(traceStateKeys[state] || "allocation_state_unknown");
+  const key = Object.hasOwn(traceStateKeys, state) ? traceStateKeys[state] : null;
+  return tr(key || "allocation_state_unknown");
 }
 function traceStateBadge(state) {
   const known = Object.hasOwn(traceStateKeys, state);
@@ -90,15 +91,18 @@ function traceStateBadge(state) {
   const detail = known ? traceStateLabel(state) : tr("allocation_state_unknown_detail", [raw]);
   return `<span class="trace-state ${known ? `trace-state-${esc(state)}` : "trace-state-unknown"}" data-state-known="${known}" title="${esc(detail)}" aria-label="${esc(detail)}">${esc(traceStateLabel(state))}</span>`;
 }
+const tracePlacementKeys = Object.freeze({
+  buffer: "allocation_placement_buffer",
+  machine: "allocation_placement_machine",
+  transport: "allocation_placement_transport",
+  release: "allocation_placement_release",
+});
 function tracePlacementLabel(lot) {
   const placement = lot?.placement;
   if (!placement || typeof placement !== "object") return tr("allocation_placement_unavailable");
-  const key = {
-    buffer: "allocation_placement_buffer",
-    machine: "allocation_placement_machine",
-    transport: "allocation_placement_transport",
-    release: "allocation_placement_release",
-  }[placement.kind] || "allocation_placement_unknown";
+  const key = Object.hasOwn(tracePlacementKeys, placement.kind)
+    ? tracePlacementKeys[placement.kind]
+    : "allocation_placement_unknown";
   return `${tr(key)}${placement.id === undefined || placement.id === null || placement.id === "" ? "" : ` · ${placement.id}`}`;
 }
 function blockedReason(lot, cursor) {
