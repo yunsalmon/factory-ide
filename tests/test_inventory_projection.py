@@ -54,6 +54,40 @@ class InventoryProjectionTests(unittest.TestCase):
             events.append(dict(index=i,time=0,kind='blocked' if id=='B' else 'arrival',lot=lot,state_changes={'lots':{id:lot},'machines':{'M':{'state':'reserved','lot':'R'}}}))
         return dict(model={'machines':[{'id':'M','process':'P1','line':'A'}], 'routes':[]},events=events,summary={'horizon':20})
 
+    def test_cached_adapter_matches_standalone_graph_at_backward_cursors(self):
+        graph=(ROOT/'web/graph-state.js').read_text()
+        # The standalone implementation remains an independent prefix replay oracle.
+        self.page.evaluate('(s)=>{window.graphOracle=Function(s+";return graphStateProjection")()}',graph.replace("typeof inventoryReplay==='function'",'false'))
+        self.page.evaluate('(s)=>{window.graphIndexed=Function(s+";return graphStateProjection")()}',graph)
+        trace=Factory(simple()).run()
+        # Legacy actor-only events must not become graph state_changes.
+        trace['events'].append(dict(index=len(trace['events']),time=999,kind='ready',lot=dict(id='ACTOR',state='waiting',location='INPUT')))
+        result=self.page.evaluate('''r=>{const before=JSON.stringify(r), n=r.events.length;
+          for(const c of [0,n,n-1,1,Math.floor(n/2),n,0]){
+            for(const final of [false,true])if(JSON.stringify(graphOracle(r,c,final))!==JSON.stringify(graphIndexed(r,c,final)))return {cursor:c,final};
+          }
+          return before===JSON.stringify(r);
+        }''',trace)
+        self.assertIs(result,True)
+
+    def test_cache_replacement_and_cursor_order_preserve_inventory(self):
+        trace=Factory(simple()).run()
+        result=self.page.evaluate('''r=>{
+          const original=JSON.stringify(r), n=r.events.length;
+          const snapshots=new Map();
+          for(const c of [n,0,1,Math.floor(n/2),n-1,n,0]){
+            const actual=JSON.stringify(inventoryProjection(r,c));
+            const decision=r.events.slice(0,c).findLast(e=>e.kind==='decision'||e.kind==='blocked')?.index;
+            if(inventoryReplay(r,c).lastDecision!==decision)return false;
+            if(snapshots.has(c)&&snapshots.get(c)!==actual)return false;
+            snapshots.set(c,actual);
+          }
+          r.events=[...r.events.slice(0,1)];
+          const p=inventoryProjection(r,1);
+          return p.cursor===1&&p.rows.length===1&&JSON.stringify({...r,events:JSON.parse(original).events})===original;
+        }''',trace)
+        self.assertTrue(result)
+
     def test_all_states_wait_zero_and_no_future(self):
         trace=self.fixture()
         prefix=self.project(trace,7)

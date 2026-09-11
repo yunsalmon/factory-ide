@@ -8,7 +8,8 @@ const esc = (s) =>
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
   );
 const copy = (v) => JSON.parse(JSON.stringify(v));
-const fmt = (n) => new Intl.NumberFormat(locale, {minimumFractionDigits: 1, maximumFractionDigits: 1}).format(Number(n || 0));
+const replayNumberFormats=new Map();
+const fmt = (n) => {if(!replayNumberFormats.has(locale))replayNumberFormats.set(locale,new Intl.NumberFormat(locale,{minimumFractionDigits:1,maximumFractionDigits:1}));return replayNumberFormats.get(locale).format(Number(n||0));};
 const S = {
   token: "",
   source: "",
@@ -321,18 +322,16 @@ function renderTree() {
 }
 // Replay uses event order, never timestamps; returned objects cannot mutate the trace.
 function stateAt(cursor = S.cursor) {
-  const lots = {}, machines = {};
+  const snapshot=inventoryReplay(S.result,cursor);
+  const lots=copy(snapshot.lots), machines = {};
   for (const m of S.result?.model.machines || []) machines[m.id] = {state: "idle", lot: null};
-  for (const e of S.result?.events.slice(0, cursor) || []) {
-    Object.assign(lots, copy(e.state_changes?.lots || (e.lot ? {[e.lot.id]: e.lot} : {})));
-    Object.assign(machines, copy(e.state_changes?.machines || {}));
-  }
+  Object.assign(machines,copy(snapshot.machines));
   const queues = {};
   const reserved = new Set(Object.values(machines).filter(m => m.state !== "idle").map(m => m.lot));
   for (const id of ["INPUT", ...(S.result?.model.machines.map(m => m.id) || []), "OUTPUT"])
     queues[id] = Object.values(lots).filter(l => l.state === "waiting" && !reserved.has(l.id) && (l.target || l.location) === id)
       .sort((a,b) => a.ready_since - b.ready_since || a.id.localeCompare(b.id)).map(l => l.id);
-  return {lots, machines, queues, time: cursor ? S.result.events[cursor - 1].time : 0};
+  return {lots, machines, queues, time: snapshot.time};
 }
 function renderAllocationComparison() {
   const records = S.result.events.filter(e => ["decision", "blocked"].includes(e.kind));
@@ -516,7 +515,7 @@ function renderGraph() {
   });
 }
 function renderMetrics() {
-  const { lots, time } = stateAt(),
+  const { lots, time } = inventoryReplay(S.result,S.cursor),
     all = Object.values(lots),
     done = all.filter((l) => l.state === "completed");
   $("#metric-time").innerHTML = `${fmt(time)} <small>min</small>`;
@@ -529,7 +528,7 @@ function renderPlayback() {
   const count = S.result?.events.length || 0;
   $("#timeline").max = count;
   $("#timeline").value = S.cursor;
-  $("#timeline-time").textContent = fmt(stateAt().time) + " min";
+  $("#timeline-time").textContent = fmt(S.result?.events[S.cursor-1]?.time??0) + " min";
   $("#timeline-end").textContent = `${S.cursor} / ${count}`;
   $("#play-button").textContent = S.playing ? "Ⅱ" : "▶";
   for (const id of ["play-button", "step-button", "rewind-button", "export-trace"])
@@ -613,7 +612,7 @@ function seek(cursor, preserveComparison = false) {
   if (!preserveComparison) {
     const event = S.result?.events[S.cursor - 1];
     const allocation = S.result?.allocations?.find(a => a.id === event?.allocation_id);
-    S.comparison = event?.kind === "decision" || event?.kind === "blocked" ? event.index : allocation?.decision_index ?? S.result?.events.slice(0, S.cursor).findLast(e => ["decision", "blocked"].includes(e.kind))?.index;
+    S.comparison = event?.kind === "decision" || event?.kind === "blocked" ? event.index : allocation?.decision_index ?? inventoryReplay(S.result,S.cursor).lastDecision;
   }
   persistReplay();
   renderPlayback();
@@ -1153,6 +1152,7 @@ $("#reset-button").onclick = async () => {
   try {
     localStorage.removeItem("factory-studio.public.source.v1");
     localStorage.removeItem("factory-studio.public.replay.v1");
+    localStorage.removeItem("factory-studio.public.replay.v1.position");
   } catch {}
   diagnostics(); renderTree(); renderGraph(); seek(1); selectTab("events");
   status({code: "public_reset_done"});
@@ -1354,7 +1354,7 @@ async function boot() {
         await applyCode(true);
       }
       try {
-        const saved = JSON.parse(localStorage.getItem("factory-studio.public.replay.v1"));
+        const saved = readReplay("factory-studio.public.replay.v1");
         if (saved?.source === source && saved.result?.schema_version === 2) {
           S.model = saved.result.model; S.result = saved.result; S.valid = true;
           S.cursor = Number.isInteger(saved.cursor) && saved.cursor >= 0 && saved.cursor <= S.result.events.length ? saved.cursor : 1;
@@ -1382,7 +1382,7 @@ async function boot() {
     setSource(source);
     await applyCode(true);
     try {
-      const saved = JSON.parse(localStorage.getItem("factory-studio.replay.v1"));
+      const saved = readReplay("factory-studio.replay.v1");
       if (saved?.source === S.source && saved.result?.schema_version === 2) {
         S.result = saved.result; S.cursor = saved.cursor; S.tab = saved.tab || "events";
         S.resultsFinal = saved.resultsFinal || false; S.resultFilters = saved.filters || {};
@@ -1475,11 +1475,54 @@ function renderAllocationResults() {
   });
 }
 
+let replayPersistence=null;
+// Large immutable snapshots are serialized in short tasks. Cursor writes remain
+// synchronous and small, including while this cancellable snapshot job is pending.
+async function storeLargeReplay(job,result,source) {
+  const yieldTask=()=>new Promise(resolve=>setTimeout(resolve,0));
+  try {
+    await yieldTask();
+    const chunks=[];let batch=[],started=performance.now(),characters=0;
+    for(let i=0;i<result.events.length;i++){
+      if(replayPersistence!==job)return;
+      const serialized=JSON.stringify(result.events[i]);characters+=serialized.length+1;
+      // localStorage is a convenience recovery cache, never the export path.
+      // Bound both temporary strings and quota work before joining a huge trace.
+      if(characters>2000000)return;
+      batch.push(serialized);
+      if(performance.now()-started>=6){chunks.push(batch.join(','));batch=[];await yieldTask();started=performance.now();}
+    }
+    if(batch.length)chunks.push(batch.join(','));
+    if(replayPersistence!==job)return;
+    const fields=[];
+    for(const key of Object.keys(result))if(key!=='events')fields.push(JSON.stringify(key)+':'+JSON.stringify(result[key]));
+    const body='{'+fields.join(',')+',"events":['+chunks.join(',')+']}';
+    if(replayPersistence!==job)return;
+    const header=JSON.stringify({_snapshotId:job.id,source,cursor:job.cursor,tab:job.tab,resultsFinal:job.resultsFinal,filters:job.filters});
+    localStorage.setItem(job.key,header.slice(0,-1)+',"result":'+body+'}');
+  }catch{/* Keep independently saved source and avoid retrying an oversized trace. */}
+}
+function readReplay(key) {
+  const saved=JSON.parse(localStorage.getItem(key));
+  if(saved?._snapshotId){
+    let position;try{position=JSON.parse(localStorage.getItem(key+'.position'));}catch{}
+    if(position?._snapshotId===saved._snapshotId)for(const field of ['cursor','tab','resultsFinal','filters'])if(Object.hasOwn(position,field))saved[field]=position[field];
+    replayPersistence={key,result:saved.result,source:saved.source,id:saved._snapshotId};
+  }
+  return saved;
+}
 function persistReplay() {
   try {
     const key = PUBLIC_DEMO ? "factory-studio.public.replay.v1" : "factory-studio.replay.v1";
-    if (S.result) localStorage.setItem(key, JSON.stringify({source: S.source, result: S.result, cursor: S.cursor, tab: S.tab, resultsFinal: S.resultsFinal, filters: S.resultFilters}));
-    else localStorage.removeItem(key);
+    if(S.result){
+      if(replayPersistence?.result!==S.result||replayPersistence?.source!==S.source||replayPersistence?.key!==key){
+        const id=crypto.randomUUID();replayPersistence={key,result:S.result,source:S.source,id,cursor:S.cursor,tab:S.tab,resultsFinal:S.resultsFinal,filters:S.resultFilters};
+        localStorage.removeItem(key);localStorage.removeItem(key+'.position');
+        if(S.result.events.length>10000)void storeLargeReplay(replayPersistence,S.result,S.source);
+        else localStorage.setItem(key,JSON.stringify({_snapshotId:id,source:S.source,result:S.result,cursor:S.cursor,tab:S.tab,resultsFinal:S.resultsFinal,filters:S.resultFilters}));
+      }
+      localStorage.setItem(key+'.position',JSON.stringify({_snapshotId:replayPersistence.id,cursor:S.cursor,tab:S.tab,resultsFinal:S.resultsFinal,filters:S.resultFilters}));
+    }else{replayPersistence=null;localStorage.removeItem(key);localStorage.removeItem(key+'.position');}
   } catch { /* Source saving remains independent when a large trace exceeds quota. */ }
 }
 function invalidatePendingValidation() {

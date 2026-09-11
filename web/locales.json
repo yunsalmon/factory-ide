@@ -1,5 +1,9 @@
 {
   "ko": {
+    "wip_pages": "재공 목록 페이지",
+    "wip_previous": "이전",
+    "wip_next": "다음",
+    "wip_page_range": "전체 {2}개 중 {0}–{1}",
     "ui_1": "투입",
     "ui_2": "대기",
     "ui_3": "로트 선택",
@@ -802,6 +806,10 @@
     "editor_skip_results": "결과로 건너뛰기"
   },
   "en": {
+    "wip_pages": "Inventory pages",
+    "wip_previous": "Previous",
+    "wip_next": "Next",
+    "wip_page_range": "{0}–{1} of {2}",
     "ui_1": "Arrival",
     "ui_2": "Waiting",
     "ui_3": "Lot selection",
@@ -1604,6 +1612,10 @@
     "editor_skip_results": "Skip to results"
   },
   "ja": {
+    "wip_pages": "仕掛品一覧のページ",
+    "wip_previous": "前へ",
+    "wip_next": "次へ",
+    "wip_page_range": "全{2}件中 {0}–{1}",
     "ui_1": "投入",
     "ui_2": "待機",
     "ui_3": "ロット選択",

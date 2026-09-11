@@ -1,5 +1,53 @@
 # Operator inventory projection
 
+## Large replay contract
+
+Execution results are immutable after delivery. `inventoryReplay(result, cursor)`
+indexes state changes and actor history by result identity, then binary-searches
+each entity at the exact event-count cursor. Replacing the result or its events
+array invalidates the index; editing events in place is unsupported. Four cursor
+snapshots and eight filtered projections are retained per live result, using weak
+keys so replaced results can be collected. Consumers treat cached views as read-only.
+
+The snapshot supplies `lots`, `machines`, `machine_operations`, `buffers`,
+`resources`, `changedAt`, actor `history`, `lastDecision`, and `operational`.
+`graphLots`, `lotEvents`, `machineEvents`, and `bufferEvents` track explicit
+state-change records separately from actor-only history. `graph-state.js` consumes
+this optional adapter and caches projections by snapshot/scope; its standalone
+prefix-replay implementation remains available. Graph lot copies and WIP history
+arrays are materialized only when requested.
+
+WIP lot/group/detail tables show at most 15 entries per page. Localized Previous
+and Next controls retain keyboard focus; selection uses stable lot IDs across
+pages. Closed group details do not build history DOM. Filters, totals, graph
+highlights and CSV always refer to the complete filtered projection, not one page.
+
+Recovery retains the existing `*.replay.v1` JSON snapshot and adds a small
+`*.replay.v1.position` record paired by a random snapshot ID. Ordinary cursor/tab
+changes write only that small record. Legacy snapshots remain readable; corrupt
+or mismatched position records cannot replace source or result. For results over
+10,000 events, serialization yields after approximately 6 ms and stops if superseded.
+The recovery cache bounds serialized event data to 2,000,000 characters; larger
+results retain source-only recovery, as do storage quota failures. Closing before
+an asynchronous snapshot finishes also recovers source only. Explicit trace export
+is independent and remains complete. Oversized snapshots are not repeatedly retried.
+
+Regression commands:
+
+```sh
+python tests/browser_large_inventory.py
+FACTORY_PERF_GATE=1 python tests/browser_large_replay.py /tmp/large-replay.json
+```
+
+The performance fixture is deterministic: 50,000 ordered events, 1,000 unique
+waiting lots and an unbounded INPUT buffer. Chromium desktop is 1500×1100 with
+CPU rate 1; mobile is 320×844 with CDP CPU rate 4. The gate measures 20 samples per
+action through two animation frames and uses nearest-rank p95, with a separate
+200 ms long-task ceiling. Fixture construction, first index construction and
+initial installation are recorded separately, not silently folded into warm-up.
+Run performance measurements without concurrent browser suites. The JSON includes
+browser version, component CPU durations, DOM counts, duplicates and page overflow.
+
 `web/inventory-projection.js` exports the pure `inventoryProjection(result, cursor, options = {})` and `inventoryCSV(projection, columns, metadata)` functions. Browser globals and CommonJS are supported; no DOM, locale catalogue or mutable application state is required. UI integration is in `inventory-ui.js`; the app adds one tab dispatch, a graph redraw on tab changes, terminal data attributes and a highlight hook. `WIP` owns stable status/filter values independently from allocation results. No engine/model behavior changes.
 
 The cursor counts events, not timestamps: cursor 0 contains only initial-state lots (none in generated traces), cursor N includes exactly events `[0,N)`. Only `state_changes.lots` complete snapshots (or the legacy `event.lot` fallback), machine changes and history from this prefix are read. Equal-time events remain distinct. Final mode explicitly uses all events and `summary.horizon`; ordinary replay uses the last included event time, including zero. Final `result.lots` is never consulted. Projection never mutates input.

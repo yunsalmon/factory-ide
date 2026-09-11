@@ -1464,3 +1464,4 @@ dialog li {
 .editor-keyboard-help { padding: 8px 12px; border-bottom: 1px solid #d5dfd2; }
 .editor-keyboard-help p { margin: 0 0 6px; color: #344d40; font-size: 12px; line-height: 1.5; }
 .editor-keyboard-help button { font-size: 12px; }
+.wip-pager { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:8px 0; }
