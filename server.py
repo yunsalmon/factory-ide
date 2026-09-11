@@ -1,5 +1,7 @@
 """Local-only HTTP application. No build step or external frontend CDN."""
 from messages import message, descriptor
+import platform
+import simpy
 import argparse
 import ipaddress
 import json
@@ -14,6 +16,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 from model import ModelError, parse, synchronize
+from scripts.fetch_browser_runtime import PYODIDE_VERSION
 
 ROOT = Path(__file__).resolve().parent
 TOKEN = secrets.token_urlsafe(32)
@@ -66,7 +69,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
+        policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+        if urlparse(self.path).path == "/browser-worker.js":
+            policy = "default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self'; object-src 'none'; base-uri 'none'"
+        self.send_header('Content-Security-Policy', policy)
         self.end_headers()
         try:
             self.wfile.write(data)
@@ -88,7 +94,7 @@ class Handler(BaseHTTPRequestHandler):
             catalogue = (ROOT / 'web/locales.json').read_text()
             return self.send(200, ('const translations = ' + catalogue + ';').encode(), 'text/javascript; charset=utf-8')
         if path == '/api/bootstrap':
-            return self.send(200, {'token': TOKEN, 'source': (ROOT / 'examples/demo.py').read_text(), 'version': '1.0.0'})
+            return self.send(200, {'token': TOKEN, 'source': (ROOT / 'examples/demo.py').read_text(), 'version': '1.0.0', 'runtime': {'kind': 'local', 'application': '1.0.0', 'runtime': {'python': platform.python_version(), 'simpy': simpy.__version__}}})
         if path.startswith('/api/jobs/'):
             if self.headers.get('X-Factory-Token') != TOKEN:
                 return self.send(403, {'error': message('message_41')})
@@ -97,6 +103,19 @@ class Handler(BaseHTTPRequestHandler):
                 result = {k: v for k, v in job.items() if k in ('status', 'payload')} if job else None
             return self.send(200 if result else 404, result or {'error': message('message_42')})
         assets = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'), '/i18n.js': ('i18n.js', 'text/javascript'), '/allocation-results.js': ('allocation-results.js', 'text/javascript'), '/style.css': ('style.css', 'text/css')}
+        assets.update({f'/{name}': (name, 'text/javascript') for name in ('inventory-projection.js', 'inventory-ui.js', 'scenario-comparison.js', 'scenario-ui.js')})
+        assets.update({f'/{name}': (name, 'text/javascript') for name in ('order-projection.js', 'order-ui.js')})
+        assets.update({f'/{name}': (name, 'text/javascript') for name in ('browser-runtime.js','browser-worker.js','experiment-core.js','experiment-ui.js')})
+        if path.startswith('/runtime/') and path.removeprefix('/runtime/') in ('engine.py','model.py','messages.py','orders.py','disruptions.py','operation_metrics.py'):
+            return self.send(200, (ROOT / path.removeprefix('/runtime/')).read_bytes(), 'text/plain; charset=utf-8')
+        if path.startswith(f'/vendor/pyodide/{PYODIDE_VERSION}/'):
+            name = path.removeprefix(f'/vendor/pyodide/{PYODIDE_VERSION}/')
+            target = ROOT / '.cache/browser-runtime' / name
+            if '/' not in name and name in ('pyodide.js','pyodide.asm.js','pyodide.asm.wasm','python_stdlib.zip','pyodide-lock.json','simpy-4.1.1-py3-none-any.whl') and target.is_file():
+                return self.send(200, target.read_bytes(), 'application/wasm' if name.endswith('.wasm') else 'text/javascript' if name.endswith('.js') else 'application/octet-stream')
+        assets['/locales.json'] = ('locales.json', 'application/json')
+        assets['/operations.js'] = ('operations.js', 'text/javascript')
+        assets.update({f'/{name}': (name, 'text/javascript') for name in ('order-projection.js', 'order-ui.js', 'data-core.js', 'data-ui.js', 'data-worker.js')})
         if path.startswith('/vendor/codemirror/'):
             name = path.removeprefix('/vendor/codemirror/')
             if '/' not in name and name.endswith(('.js', '.css')) and (ROOT / 'web/vendor/codemirror' / name).is_file():
