@@ -692,7 +692,7 @@ h1 {
   fill: #91a18e;
   font-size: 7px;
 }
-.trace-panel {
+.trace-panel:not([data-boot-stage]) {
   content-visibility: auto;
   contain-intrinsic-size: auto 310px;
   min-height: 255px;
