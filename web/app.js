@@ -8,7 +8,26 @@ const esc = (s) =>
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
   );
 const copy = (v) => JSON.parse(JSON.stringify(v));
-const fmt = (n) => new Intl.NumberFormat(locale, {minimumFractionDigits: 1, maximumFractionDigits: 1}).format(Number(n || 0));
+const nextRenderTurn = () => new Promise(resolve => requestAnimationFrame(resolve));
+async function revealInitialPanels() {
+  for (const panel of $$('[data-boot-stage]')) {
+    panel.removeAttribute('data-boot-stage');
+    await nextRenderTurn();
+  }
+  document.documentElement.dataset.uiReady = 'true';
+}
+const numberFormatters = new Map();
+function formatNumber(value, options) {
+  const key = `${locale}:${JSON.stringify(options)}`;
+  let formatter = numberFormatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, options);
+    numberFormatters.set(key, formatter);
+  }
+  return formatter.format(value);
+}
+const fmt = (n) => formatNumber(Number(n || 0), {minimumFractionDigits: 1, maximumFractionDigits: 1});
+const preciseNumber = (n) => formatNumber(n, {maximumFractionDigits: 6});
 const S = {
   token: "",
   source: "",
@@ -46,6 +65,9 @@ let parseTimer,
   editor = null,
   settingEditor = false,
   errorLine = null;
+let graphRenderKey = null;
+const eventPageSize = 40;
+let eventPage = 0, eventPageCursor = -1, eventPageResult = null, eventPageLot = null;
 const browserRuntime = PUBLIC_DEMO
   ? new BrowserPythonRuntime({onState: (state, runtime) => renderRuntimeState(state, runtime)})
   : null;
@@ -442,9 +464,18 @@ function renderGraphOperationDetail(projection = graphProjection()) {
 
 function renderGraph() {
   if (!S.model) return;
+  const viewport = $("#graph-viewport"),
+    finalView = S.tab === "wip" ? WIP.finalView : S.tab === "operations" ? S.operationScope !== "cursor" : S.tab === "orders" ? PLANNER.finalView : false,
+    renderKey = [S.model, S.result, S.cursor, finalView, S.tab === "wip", S.lot,
+      S.selected?.type, S.selected?.id, WIP.selectedLot, WIP.selectedGroup, locale,
+      autoFit, autoFit ? viewport.clientWidth : S.zoom];
+  if (graphRenderKey && renderKey.every((value, index) => graphRenderKey[index] === value)) {
+    if ($("#graph-operation-detail:empty")) renderGraphOperationDetail(graphProjection());
+    return;
+  }
   const { positions, groups, rows, width, height } = graphLayout();
   if (autoFit)
-    S.zoom = Math.min(1.15, Math.max(0.38, ($("#graph-viewport").clientWidth - 12) / width));
+    S.zoom = Math.min(1.15, Math.max(0.38, (viewport.clientWidth - 12) / width));
   const projection = graphProjection(),
     { lots, machines } = projection,
     active = S.result?.events[projection.cursor - 1];
@@ -514,6 +545,7 @@ function renderGraph() {
       if (e.key === "Enter") g.onclick();
     };
   });
+  graphRenderKey = renderKey;
 }
 function renderMetrics() {
   const { lots, time } = stateAt(),
@@ -543,8 +575,8 @@ function selectTab(tab) {
   renderTrace();
 }
 function renderTrace() {
-  const container = $("#trace-content"),
-    events = S.result?.events.slice(0, S.cursor) || [];
+  const container = $("#trace-content");
+  container.dataset.renderedTab = S.tab;
   if (S.tab === "console") {
     container.innerHTML = `<pre class="console ${S.parseError ? "error" : ""}">${esc([S.parseError, ...S.warnings.map((w,i) => localized(w, S.warningMessages?.[i])), S.console, displayMessage(S.runtimeError)].filter(Boolean).join("\n\n") || tr("ui_67"))}</pre>`;
     return;
@@ -562,6 +594,7 @@ function renderTrace() {
   if (S.tab === "wip") { renderInventory(); return; }
   if (S.tab === "results") { renderAllocationResults(); return; }
   if (S.tab === "allocations") { renderAllocationComparison(); return; }
+  const events = S.result.events.slice(0, S.cursor);
   if (S.tab === "utilization") {
     const time = stateAt().time,
       spans = {},
@@ -590,16 +623,25 @@ function renderTrace() {
     $$("[data-lot]").forEach((r) => (r.onclick = () => inspectLot(r.dataset.lot)));
     return;
   }
-  const filtered = events
-    .filter((e) => !S.lot || e.lot?.id === S.lot)
-    .slice(-150)
-    .reverse();
+  const matching = events.filter((e) => !S.lot || e.lot?.id === S.lot);
+  if (eventPageCursor !== S.cursor || eventPageResult !== S.result || eventPageLot !== S.lot) {
+    eventPage = 0; eventPageCursor = S.cursor; eventPageResult = S.result; eventPageLot = S.lot;
+  }
+  const pageCount = Math.max(1, Math.ceil(matching.length / eventPageSize));
+  eventPage = Math.min(eventPage, pageCount - 1);
+  const newerOffset = eventPage * eventPageSize,
+    pageEnd = matching.length - newerOffset,
+    pageStart = Math.max(0, pageEnd - eventPageSize),
+    filtered = matching.slice(pageStart, pageEnd).reverse(),
+    pager = pageCount > 1 ? `<nav class="event-pages" aria-label="${tr("event_page_label")}"><button id="event-newer" ${eventPage === 0 ? "disabled" : ""}>${tr("event_page_newer")}</button><span>${tr("event_page_status", [eventPage + 1, pageCount])}</span><button id="event-older" ${eventPage === pageCount - 1 ? "disabled" : ""}>${tr("event_page_older")}</button></nav>` : "";
   container.innerHTML =
     (S.lot
       ? `<div class="lot-filter">${esc(S.lot)} ${tr("ui_75")}<button id="clear-lot">${tr("ui_76")}</button></div>`
       : "") +
-    `<table><thead><tr><th>${tr("event_time")}</th><th>${tr("event_lot")}</th><th>${tr("event_kind")}</th><th>${tr("event_location")}</th><th>${tr("event_detail")}</th></tr></thead><tbody>${filtered.map((e) => `<tr class="clickable ${e.index === S.cursor - 1 ? "current" : ""}" data-event="${e.index}"><td class="mono">${fmt(e.time)}</td><td class="mono">${esc(e.lot?.id || "—")}</td><td><span class="kind ${e.kind}">${kinds[e.kind] || esc(e.kind)}</span></td><td>${esc(e.machine || e.lot?.location || "—")}</td><td>${esc(e.kind === "decision" ? localized(e.reason, e.reason_message) : e.kind === "move" ? `${e.lot.location} → ${e.lot.target}` : e.kind === "start" ? (e.duration === null ? tr("ui_77") : `${tr("ui_78")} ${fmt(e.duration)} min`) : localized(e.reason, e.reason_message) || e.route || "—")}</td></tr>`).join("")}</tbody></table>`;
+    `${pager}<table><thead><tr><th>${tr("event_time")}</th><th>${tr("event_lot")}</th><th>${tr("event_kind")}</th><th>${tr("event_location")}</th><th>${tr("event_detail")}</th></tr></thead><tbody>${filtered.map((e) => `<tr class="clickable ${e.index === S.cursor - 1 ? "current" : ""}" data-event="${e.index}"><td class="mono">${fmt(e.time)}</td><td class="mono">${esc(e.lot?.id || "—")}</td><td><span class="kind ${e.kind}">${kinds[e.kind] || esc(e.kind)}</span></td><td>${esc(e.machine || e.lot?.location || "—")}</td><td>${esc(e.kind === "decision" ? localized(e.reason, e.reason_message) : e.kind === "move" ? `${e.lot.location} → ${e.lot.target}` : e.kind === "start" ? (e.duration === null ? tr("ui_77") : `${tr("ui_78")} ${fmt(e.duration)} min`) : localized(e.reason, e.reason_message) || e.route || "—")}</td></tr>`).join("")}</tbody></table>`;
   $$("[data-event]").forEach((r) => (r.onclick = () => inspectEvent(Number(r.dataset.event))));
+  if ($("#event-newer")) $("#event-newer").onclick = () => { eventPage--; renderTrace(); };
+  if ($("#event-older")) $("#event-older").onclick = () => { eventPage++; renderTrace(); };
   if ($("#clear-lot"))
     $("#clear-lot").onclick = () => {
       S.lot = null;
@@ -1243,7 +1285,8 @@ window.addEventListener("keydown", (e) => {
 new ResizeObserver(() => {
   if (S.model) renderGraph();
 }).observe($("#graph-viewport"));
-if (window.CodeMirror) {
+function enhanceEditor() {
+  if (editor || !window.CodeMirror) return editor;
   editor = CodeMirror.fromTextArea($("#code"), {
     mode: { name: "python", version: 3 },
     theme: "factory",
@@ -1332,13 +1375,29 @@ if (window.CodeMirror) {
   });
   editor.on("cursorActivity", updateEditor);
   new ResizeObserver(() => editor.refresh()).observe($(".editor-panel"));
+  editor.focus();
+  return editor;
 }
+enhanceEditor();
+$("#enhance-editor").onclick = async () => {
+  $("#enhance-editor").disabled = true;
+  await window.loadEnhancedEditor?.();
+  $("#enhance-editor").hidden = Boolean(editor);
+};
+if (editor) $("#enhance-editor").hidden = true;
 async function boot() {
   try {
+    await window.initialLocaleReady;
+    translateStatic();
+    if (!PUBLIC_DEMO) {
+      await window.loadEnhancedEditor?.();
+      if (editor) $("#enhance-editor").hidden = true;
+    }
     if (PUBLIC_DEMO) {
       const response = await fetch("/demo.json");
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
+      await nextRenderTurn();
       S.example = data.source;
       S.demoResult = copy(data.result);
       S.demoVersion = data.version;
@@ -1346,6 +1405,7 @@ async function boot() {
       let source = data.source;
       try { source = localStorage.getItem("factory-studio.public.source.v1") || source; } catch {}
       setSource(source);
+      await nextRenderTurn();
       S.model = data.result.model; S.result = source === data.source ? copy(data.result) : null; S.valid = source === data.source;
       S.warnings = data.result.warnings; S.warningMessages = data.result.warning_messages;
       const runtime = data.version.browser_runtime;
@@ -1364,11 +1424,14 @@ async function boot() {
           restoredPublicReplay = true;
         }
       } catch {}
+      await nextRenderTurn();
       $("#project-name").textContent = S.model.name;
-      diagnostics(); renderTree(); renderGraph();
+      diagnostics(); renderTree();
+      await nextRenderTurn();
       seek(S.result ? (restoredPublicReplay ? S.cursor : 1) : 0);
       selectTab(S.result ? S.tab : "console");
       status({code: "public_ready"});
+      await revealInitialPanels();
       return;
     }
     const data = await api("/api/bootstrap");
@@ -1393,9 +1456,11 @@ async function boot() {
     renderPlayback();
     renderTrace();
     status({code: "ui_160"});
+    await revealInitialPanels();
   } catch (e) {
     status({code: "ui_161"});
     toast(e.detail || e.message);
+    await revealInitialPanels();
   }
 }
 boot();
@@ -1426,13 +1491,13 @@ function selectResult(row) {
 function renderAllocationResults() {
   const projection = allocationResults(S.result, S.cursor, S.resultsFinal, S.resultFilters);
   const {rows, time} = projection;
-  const model = S.result.model;
+  const model = S.result.model, columns = allocationColumns();
   const statuses = [tr("ui_163"), tr("ui_164"), tr("ui_165"), tr("ui_29"), tr("ui_30"), tr("ui_166"), tr("ui_167"), tr("ui_168"), tr("ui_169")];
   const choices = {process: model.processes.map(p => p.id), line: model.machines.map(m => m.line),
     machine: ["INPUT", ...model.machines.map(m => m.id), "OUTPUT"], lot: S.result.events.filter(e => e.kind === "arrival").map(e => e.lot.id), status: statuses};
   const names = {process: tr("ui_89"), line: tr("ui_90"), machine: tr("ui_40"), lot: tr("ui_35"), status: tr("ui_37")};
   const filterHTML = Object.entries(choices).map(([key,values]) => `<label>${names[key]} <select data-result-filter="${key}"><option value="">${tr("ui_170")}</option>${[...new Set(values)].map(v => `<option value="${esc(v)}" ${S.resultFilters[key] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`).join("");
-  $("#trace-content").innerHTML = `<div class="allocation-results"><div class="result-controls"><label>${tr("ui_171")} <select id="results-view"><option value="replay" ${!S.resultsFinal ? "selected" : ""}>${tr("ui_172")}</option><option value="final" ${S.resultsFinal ? "selected" : ""}>${tr("ui_173")}</option></select></label>${filterHTML}<label>${tr("ui_174")} <input id="result-search" value="${esc(S.resultFilters.search || "")}" type="search"></label><button id="result-reset">${tr("ui_175")}</button><button id="result-csv">${tr("ui_176")}</button></div><p id="result-context">${S.resultsFinal ? tr("ui_177") : `${tr("ui_178")} ${S.cursor}`} · ${time} min · ${rows.length}${tr("ui_179")} ${Object.values(S.resultFilters).some(Boolean) ? tr("ui_180") : tr("ui_181")}${tr("ui_182")}</p><div class="result-table-wrap"><table id="result-table"><thead><tr>${allocationColumns().map(([name]) => `<th>${name}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i) => `<tr data-result-row="${i}">${allocationColumns().map(([,get],j) => `<td>${j === 0 ? `<button data-result-select="${i}">${esc(r.id || tr("ui_183"))}</button>` : esc(typeof get(r) === "number" ? new Intl.NumberFormat(locale, {maximumFractionDigits: 6}).format(get(r)) : get(r) ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>${rows.length ? "" : `<p>${tr("ui_184")}</p>`}<h3>${tr("ui_185")}</h3><p>${tr("ui_186")}</p><div id="machine-timeline"></div></div>`;
+  $("#trace-content").innerHTML = `<div class="allocation-results"><div class="result-controls"><label>${tr("ui_171")} <select id="results-view"><option value="replay" ${!S.resultsFinal ? "selected" : ""}>${tr("ui_172")}</option><option value="final" ${S.resultsFinal ? "selected" : ""}>${tr("ui_173")}</option></select></label>${filterHTML}<label>${tr("ui_174")} <input id="result-search" value="${esc(S.resultFilters.search || "")}" type="search"></label><button id="result-reset">${tr("ui_175")}</button><button id="result-csv">${tr("ui_176")}</button></div><p id="result-context">${S.resultsFinal ? tr("ui_177") : `${tr("ui_178")} ${S.cursor}`} · ${time} min · ${rows.length}${tr("ui_179")} ${Object.values(S.resultFilters).some(Boolean) ? tr("ui_180") : tr("ui_181")}${tr("ui_182")}</p><div class="result-table-wrap"><table id="result-table"><thead><tr>${columns.map(([name]) => `<th>${name}</th>`).join("")}</tr></thead><tbody>${rows.map((r,i) => `<tr data-result-row="${i}">${columns.map(([,get],j) => {const value = get(r); return `<td>${j === 0 ? `<button data-result-select="${i}">${esc(r.id || tr("ui_183"))}</button>` : esc(typeof value === "number" ? preciseNumber(value) : value ?? "")}</td>`;}).join("")}</tr>`).join("")}</tbody></table></div>${rows.length ? "" : `<p>${tr("ui_184")}</p>`}<h3>${tr("ui_185")}</h3><p>${tr("ui_186")}</p><div id="machine-timeline"></div></div>`;
   $("#results-view").onchange = e => {S.resultsFinal = e.target.value === "final"; renderTrace();};
   $$('[data-result-filter]').forEach(el => el.onchange = () => {S.resultFilters[el.dataset.resultFilter] = el.value; renderTrace();});
   $("#result-search").oninput = e => {
@@ -1498,7 +1563,7 @@ window.addEventListener("pagehide", () => {
   dataWorkerStop(DATA.worker);
   browserRuntime?.stop();
 });
-$("#language").onchange = () => {
+$("#language").onchange = async () => {
   const oldLocale = locale;
   const translateOld = text => {
     const key = Object.keys(translations[oldLocale]).find(k => translations[oldLocale][k] === text);
@@ -1508,7 +1573,9 @@ $("#language").onchange = () => {
   const selected = copy(S.selected), cursor = S.cursor;
   const cmCursor = editor?.getCursor();
   const inspectorOpen = !$("#inspector").hidden;
-  locale = $("#language").value;
+  const nextLocale = $("#language").value;
+  await window.loadLocale?.(nextLocale);
+  locale = nextLocale;
   try { localStorage.setItem(localeKey, locale); } catch {}
   if (S.resultFilters.status) S.resultFilters.status = translateOld(S.resultFilters.status);
   translateStatic();

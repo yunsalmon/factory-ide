@@ -394,6 +394,10 @@ h1 {
   overflow: hidden;
   box-shadow: 0 3px 7px #304b3510;
 }
+[data-boot-stage] {
+  content-visibility: hidden;
+  contain-intrinsic-size: auto 300px;
+}
 .panel-header {
   height: 45px;
   display: flex;
@@ -669,6 +673,8 @@ h1 {
   font-size: 7px;
 }
 .trace-panel {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 310px;
   min-height: 255px;
 }
 .trace-top {
@@ -759,6 +765,7 @@ h1 {
   height: 196px;
   overflow: auto;
 }
+.event-pages { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 6px 12px; font-size: 10px; }
 table {
   border-collapse: collapse;
   width: 100%;
