@@ -34,7 +34,19 @@ with sync_playwright() as p:
     page.wait_for_timeout(150)
     assert page.evaluate('readReplay("factory-studio.replay.v1").result.events.length===smallTrace.events.length')
    page.evaluate('()=>{'+(ROOT/'tests/large_replay_fixture.js').read_text()+';window.largeReplayFixture=largeReplayFixture;}')
-   page.evaluate('()=>{S.result=largeReplayFixture(S.result);S.model=S.result.model;WIP.filters={};seek(50000);selectTab("wip")}')
+   cancelled=page.evaluate('''async()=>{const controller=new AbortController(),before=S.result;let abort=false;
+     try{await largeReplayFixture(S.result,{signal:controller.signal,onProgress:()=>controller.abort()});}catch(e){abort=e.name==='AbortError';}
+     return abort&&S.result===before;}''')
+   assert cancelled
+   cancelled=page.evaluate('''async()=>{window.largeCandidate=await largeReplayFixture(S.result);const old=S.result,source=S.source;
+     const saved=SCENARIOS.items;SCENARIOS.items=[{source:S.source,result:largeCandidate}];
+     const restore=scenarioLoadResult(0);setTimeout(()=>cancelRun(),0);await restore;SCENARIOS.items=saved;
+     return S.result===old&&S.source===source&&!inventoryIndexes.has(largeCandidate)&&!S.busy;}''')
+   assert cancelled
+   assert page.evaluate('''async()=>{S.busy=true;const old=S.result;
+     const preparation=prepareReplayForDisplay(largeCandidate);setTimeout(()=>cancelRun(),0);
+     try{await preparation;return false;}catch(error){return error.name==='AbortError'&&!S.busy&&S.result===old&&!inventoryIndexes.has(largeCandidate);}}''')
+   page.evaluate('async()=>{await prepareReplayForDisplay(largeCandidate);S.result=largeCandidate;S.model=S.result.model;WIP.filters={};seek(50000);selectTab("wip")}')
    limit=page.evaluate('WIP_PAGE_SIZE')
    assert page.locator('#wip-visible').inner_text()=='1000'
    assert page.locator('[data-wip-lot]').count()==limit

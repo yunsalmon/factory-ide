@@ -88,6 +88,31 @@ class InventoryProjectionTests(unittest.TestCase):
         }''',trace)
         self.assertTrue(result)
 
+    def test_yielded_preparation_abort_stale_identity_and_retry_are_atomic(self):
+        trace=Factory(simple()).run()
+        result=self.page.evaluate('''async r=>{
+          const source=r.events;r.events=Array.from({length:40000},(_,i)=>({...source[i%source.length],index:i}));
+          const before=JSON.stringify(r),controller=new AbortController();let progress=0,ticks=0;
+          const timer=setInterval(()=>ticks++,0);let aborted=false,stale=false;
+          try{await prepareInventoryReplay(r,{signal:controller.signal,onProgress:(n,total)=>{progress++;if(n<total)controller.abort();}});}catch(e){aborted=e.name==='AbortError';}
+          const partial=inventoryIndexes.has(r);
+          const pending=prepareInventoryReplay(r);setTimeout(()=>r.events=[...r.events],0);
+          try{await pending;}catch(e){stale=e.name==='AbortError';}
+          const stalePublished=inventoryIndexes.has(r);
+          await prepareInventoryReplay(r);clearInterval(timer);
+          const cached=inventoryIndexes.get(r),expected={};
+          for(const e of r.events)Object.assign(expected,e.state_changes?.lots||{});
+          return {aborted,stale,partial,stalePublished,progress,ticks,ready:inventoryIndexCurrent(r,cached),
+            exact:JSON.stringify(inventoryReplay(r,r.events.length).lots)===JSON.stringify(expected),unchanged:JSON.stringify(r)===before};
+        }''',trace)
+        self.assertTrue(result['aborted'],result)
+        self.assertTrue(result['stale'],result)
+        self.assertFalse(result['partial'],result)
+        self.assertFalse(result['stalePublished'],result)
+        self.assertGreater(result['progress'],0)
+        self.assertGreater(result['ticks'],0)
+        self.assertTrue(result['ready'] and result['exact'] and result['unchanged'],result)
+
     def test_all_states_wait_zero_and_no_future(self):
         trace=self.fixture()
         prefix=self.project(trace,7)

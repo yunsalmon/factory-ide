@@ -9,6 +9,15 @@ array invalidates the index; editing events in place is unsupported. Four cursor
 snapshots and eight filtered projections are retained per live result, using weak
 keys so replaced results can be collected. Consumers treat cached views as read-only.
 
+Before publishing a large run or restored scenario, the UI awaits
+`prepareInventoryReplay(result, {signal, isCurrent, onProgress})`. Index preparation
+yields after approximately 6 ms, checks cancellation and result identity after
+each yield, and publishes only the complete index. Stop and reset cancel preparation;
+the previous displayed result remains intact. The synchronous `inventoryReplay`
+fallback remains available to standalone pure consumers; UI delivery prepares its
+index first. Progress is localized and large scenario restores share immutable
+event data instead of synchronously cloning the complete trace.
+
 The snapshot supplies `lots`, `machines`, `machine_operations`, `buffers`,
 `resources`, `changedAt`, actor `history`, `lastDecision`, and `operational`.
 `graphLots`, `lotEvents`, `machineEvents`, and `bufferEvents` track explicit
@@ -45,6 +54,13 @@ CPU rate 1; mobile is 320×844 with CDP CPU rate 4. The gate measures 20 samples
 action through two animation frames and uses nearest-rank p95, with a separate
 200 ms long-task ceiling. Fixture construction, first index construction and
 initial installation are recorded separately, not silently folded into warm-up.
+The observer is installed before navigation. Each width repeats three fresh,
+in-page, yielded fixture/index/install preparations, and all tasks overlapping
+those phases are gated, including fixture construction and asynchronous recovery.
+Earlier page boot tasks are disclosed separately (page boot is issue #35's scope).
+`FACTORY_PERF_INJECT_LONG_TASK=1 FACTORY_PERF_COLD_RUNS=1` deliberately injects a
+220 ms cold task and must fail the gate. Cancellation tests reject partial indexes
+and confirm a clean next preparation.
 Run performance measurements without concurrent browser suites. The JSON includes
 browser version, component CPU durations, DOM counts, duplicates and page overflow.
 

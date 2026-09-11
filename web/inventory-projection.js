@@ -4,12 +4,9 @@
 const inventoryIndexes = new WeakMap();
 const inventoryViews = new WeakMap();
 const inventoryStateKeys=['lots','machines','machine_operations','buffers','resources'];
-function inventoryReplay(result, cursor) {
-  const events=result?.events||[],end=Math.max(0,Math.min(events.length,Math.trunc(Number(cursor)||0)));
-  if(!result)return {cursor:0,time:0,lots:{},machines:{},machine_operations:{},buffers:{},resources:{},lotEvents:{},machineEvents:{},bufferEvents:{},changedAt:{},history:new Map(),operational:false};
-  let index=inventoryIndexes.get(result);
-  if(!index||index.events!==events||index.length!==events.length){
-    index={events,length:events.length,series:{},actors:new Map(),decisions:[],cache:new Map(),operationalAt:Object.hasOwn(result.initial_state||{},'machine_operations')?0:Infinity};
+function* inventoryIndexSteps(result) {
+    const events=result.events||[];
+    const index={events,length:events.length,series:{},actors:new Map(),decisions:[],cache:new Map(),operationalAt:Object.hasOwn(result.initial_state||{},'machine_operations')?0:Infinity};
     for(const key of inventoryStateKeys){
       const series=index.series[key]=new Map();
       for(const [id,value] of Object.entries(result.initial_state?.[key]||{}))series.set(id,[{at:0,value,since:value.location_since??0}]);
@@ -37,8 +34,40 @@ function inventoryReplay(result, cursor) {
         const previous=list[list.length-1];
         list.push({at,event:e,boundary:boundaries.has(e.kind)?e:previous?.boundary,decision:e.kind==='decision'||e.kind==='blocked'?e:previous?.decision});
       }
+      if((i+1)%128===0)yield i+1;
     }
-    inventoryIndexes.set(result,index);
+    return index;
+}
+function inventoryIndexCurrent(result,index) {
+  return index&&index.events===result.events&&index.length===result.events.length;
+}
+// Prepare before publishing a large result to synchronous replay consumers.
+// Incomplete/cancelled builds never enter the shared index cache.
+async function prepareInventoryReplay(result,{signal,isCurrent=()=>true,onProgress=()=>{}}={}) {
+  if(!result)return;
+  const events=result.events, length=events.length;
+  const check=()=>{if(signal?.aborted||!isCurrent()||result.events!==events||events.length!==length)throw new DOMException('Replay preparation cancelled','AbortError');};
+  check();if(inventoryIndexCurrent(result,inventoryIndexes.get(result)))return;
+  const steps=inventoryIndexSteps(result);
+  let start=performance.now();
+  for(;;){
+    check();const step=steps.next();
+    if(step.done){onProgress(length,length);check();inventoryIndexes.set(result,step.value);return;}
+    if(performance.now()-start>=6){
+      onProgress(step.value,length);
+      await new Promise(resolve=>setTimeout(resolve,0));
+      check();start=performance.now();
+    }
+  }
+}
+function inventoryReplay(result, cursor) {
+  const events=result?.events||[],end=Math.max(0,Math.min(events.length,Math.trunc(Number(cursor)||0)));
+  if(!result)return {cursor:0,time:0,lots:{},machines:{},machine_operations:{},buffers:{},resources:{},lotEvents:{},machineEvents:{},bufferEvents:{},changedAt:{},history:new Map(),operational:false};
+  let index=inventoryIndexes.get(result);
+  if(!inventoryIndexCurrent(result,index)){
+    const steps=inventoryIndexSteps(result);let step;
+    do{step=steps.next();}while(!step.done);
+    index=step.value;inventoryIndexes.set(result,index);
   }
   if(index.cache.has(end))return index.cache.get(end);
   const upper=list=>{let lo=0,hi=list.length;while(lo<hi){const mid=(lo+hi)>>>1;if(list[mid].at<=end)lo=mid+1;else hi=mid;}return lo;};
@@ -153,4 +182,4 @@ function inventoryCSV(projection, columns, metadata = {}) {
   const fields = [...columns, ...Object.entries(metadata).map(([name,value]) => [name, () => value])];
   return '\uFEFF' + [fields.map(([name]) => name), ...projection.rows.map(row => fields.map(([,get]) => get(row)))].map(row => row.map(cell).join(',')).join('\r\n');
 }
-if (typeof module !== "undefined") module.exports = {inventoryReplay, inventoryProjection, inventoryCSV};
+if (typeof module !== "undefined") module.exports = {prepareInventoryReplay, inventoryReplay, inventoryProjection, inventoryCSV};

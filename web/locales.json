@@ -1,5 +1,6 @@
 {
   "ko": {
+    "replay_preparing": "재생 준비 중: 이벤트 {0}/{1} · 실행 버튼으로 취소",
     "wip_pages": "재공 목록 페이지",
     "wip_previous": "이전",
     "wip_next": "다음",
@@ -806,6 +807,7 @@
     "editor_skip_results": "결과로 건너뛰기"
   },
   "en": {
+    "replay_preparing": "Preparing replay: {0}/{1} events · press Stop to cancel",
     "wip_pages": "Inventory pages",
     "wip_previous": "Previous",
     "wip_next": "Next",
@@ -1612,6 +1614,7 @@
     "editor_skip_results": "Skip to results"
   },
   "ja": {
+    "replay_preparing": "再生を準備中: イベント {0}/{1} · 停止でキャンセル",
     "wip_pages": "仕掛品一覧のページ",
     "wip_previous": "前へ",
     "wip_next": "次へ",

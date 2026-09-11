@@ -945,8 +945,23 @@ function inspectLot(id, refresh = true) {
     renderTrace();
   }
 }
+let replayPreparationAbort=null;
+async function prepareReplayForDisplay(result,isCurrent=()=>true) {
+  if(!result)return;
+  if(result.events.length<=10000)return prepareInventoryReplay(result,{isCurrent});
+  replayPreparationAbort?.abort();
+  const controller=new AbortController(),wasBusy=S.busy;
+  replayPreparationAbort=controller;S.busy=true;
+  $("#run-button").textContent=tr("ui_145");
+  try {
+    await prepareInventoryReplay(result,{signal:controller.signal,isCurrent,
+      onProgress:(done,total)=>status({code:'replay_preparing',args:[done,total]})});
+  } finally {
+    if(replayPreparationAbort===controller){replayPreparationAbort=null;S.busy=controller.signal.aborted?false:wasBusy;if(!S.job)$("#run-button").textContent=tr("ui_152");}
+  }
+}
 async function run() {
-  if (S.job || (PUBLIC_DEMO && browserRuntime.state === "loading")) {
+  if (S.job || replayPreparationAbort || (PUBLIC_DEMO && browserRuntime.state === "loading")) {
     await cancelRun();
     return;
   }
@@ -1015,6 +1030,8 @@ async function run() {
         runtime: copy(browserRuntime.runtime),
       };
     }
+    await prepareReplayForDisplay(p.result,()=>ticket===runSerial&&S.revision===revision);
+    if(ticket!==runSerial||S.revision!==revision)return;
     S.result = p.result;
     S.warnings = p.result.warnings;
     S.warningMessages = p.result.warning_messages || [];
@@ -1031,6 +1048,7 @@ async function run() {
     play();
   } catch (e) {
     if (ticket !== runSerial) return;
+    if(e.name==='AbortError'){status({code:'ui_148'});return;}
     S.console = (e.console || S.console || "") + (e.traceback ? "\n" + e.traceback : "");
     S.runtimeError = e.code === "browser_init_error" ? {code: "public_init_error"} : e.code === "browser_init_timeout" ? {code: "public_init_timeout"} : e.code === "browser_timeout" ? {code: "public_timeout"} : e.detail || e.error_message || e.message;
     S.runtimeErrorLine = e.line || null;
@@ -1048,14 +1066,15 @@ async function run() {
 }
 async function cancelRun() {
   const id = S.job;
-  if (!id && !(PUBLIC_DEMO && browserRuntime.state === "loading")) return;
+  if (!id && !replayPreparationAbort && !(PUBLIC_DEMO && browserRuntime.state === "loading")) return;
+  replayPreparationAbort?.abort();
+  ++runSerial;
   if (PUBLIC_DEMO) {
     ++S.revision;
     clearTimeout(parseTimer);
     browserRuntime.stop();
   }
-  else await api("/api/cancel", { job_id: id });
-  ++runSerial;
+  else if(id)await api("/api/cancel", { job_id: id });
   S.job = null;
   S.busy = false;
   $("#run-button").textContent = tr("ui_152");
@@ -1137,7 +1156,7 @@ $("#run-button").onclick = run;
 $("#save-button").onclick = save;
 $("#reset-button").onclick = async () => {
   if (!PUBLIC_DEMO) return;
-  if (S.job) await cancelRun();
+  if (S.job||replayPreparationAbort) await cancelRun();
   browserRuntime.stop();
   pause();
   setSource(S.example);
@@ -1216,7 +1235,7 @@ $("#file-input").onchange = async (e) => {
     const source = await file.text();
     if (PUBLIC_DEMO) await browserRuntime.parse(source);
     else await api("/api/parse", { source });
-    if (S.job) await cancelRun();
+    if (S.job||replayPreparationAbort) await cancelRun();
     invalidateTrace();
     setSource(source);
     closeInspector();
@@ -1346,7 +1365,8 @@ async function boot() {
       let source = data.source;
       try { source = localStorage.getItem("factory-studio.public.source.v1") || source; } catch {}
       setSource(source);
-      S.model = data.result.model; S.result = source === data.source ? copy(data.result) : null; S.valid = source === data.source;
+      await prepareInventoryReplay(data.result);
+      S.model = data.result.model; S.result = source === data.source ? data.result : null; S.valid = source === data.source;
       S.warnings = data.result.warnings; S.warningMessages = data.result.warning_messages;
       const runtime = data.version.browser_runtime;
       $("#demo-version").textContent = `${data.version.source_revision} · trace v${data.result.schema_version} · Pyodide ${runtime.pyodide} · Python ${runtime.python} · SimPy ${runtime.simpy} · ${data.version.trace_sha256}`;
@@ -1356,6 +1376,8 @@ async function boot() {
       try {
         const saved = readReplay("factory-studio.public.replay.v1");
         if (saved?.source === source && saved.result?.schema_version === 2) {
+          const revision=S.revision;
+          await prepareReplayForDisplay(saved.result,()=>revision===S.revision);
           S.model = saved.result.model; S.result = saved.result; S.valid = true;
           S.cursor = Number.isInteger(saved.cursor) && saved.cursor >= 0 && saved.cursor <= S.result.events.length ? saved.cursor : 1;
           S.tab = saved.tab || "events";
@@ -1384,6 +1406,8 @@ async function boot() {
     try {
       const saved = readReplay("factory-studio.replay.v1");
       if (saved?.source === S.source && saved.result?.schema_version === 2) {
+        const revision=S.revision;
+        await prepareReplayForDisplay(saved.result,()=>revision===S.revision);
         S.result = saved.result; S.cursor = saved.cursor; S.tab = saved.tab || "events";
         S.resultsFinal = saved.resultsFinal || false; S.resultFilters = saved.filters || {};
         S.warnings = S.result.warnings; S.warningMessages = S.result.warning_messages || [];
@@ -1531,6 +1555,7 @@ function invalidatePendingValidation() {
   validationGeneration++;
 }
 window.addEventListener("pagehide", () => {
+  replayPreparationAbort?.abort();
   persistReplay();
   // Invalidate deferred producers before terminating current consumers. A
   // persisted BFCache page keeps its UI/source, but performs no hidden work;
